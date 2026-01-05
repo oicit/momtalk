@@ -101,6 +101,7 @@
         let mic, meter; // 麦克风和电平表
         let isRunning = false;
         let isHovering = false; // 距离传感器/触摸状态
+        let wasHovering = false; // 记录上一帧的悬浮状态，用于触发状态改变时的震动
         
         // 物理世界参数
         const boundarySize = 6; // 物理墙壁的范围
@@ -304,6 +305,9 @@
                 isRunning = true;
                 animate();
 
+                // 启动时的微震动反馈 (Android Only)
+                triggerHaptic(50);
+
             } catch (e) {
                 alert("启动失败: " + e.message);
                 btn.innerText = "重试";
@@ -367,6 +371,15 @@
             deviceBeta = y * 45;
         }
 
+        // --- 震动反馈函数 ---
+        function triggerHaptic(duration = 10) {
+            // navigator.vibrate 支持 Android (Chrome/Firefox)
+            // iOS Safari 目前不支持 Web Haptics API
+            if (navigator.vibrate) {
+                navigator.vibrate(duration);
+            }
+        }
+
         // --- 核心循环 ---
         function animate() {
             requestAnimationFrame(animate);
@@ -375,6 +388,11 @@
 
             // 0. 重力逻辑控制 (核心)
             if (isHovering) {
+                // 状态切换时触发一次中等震动，模拟力场开启
+                if (!wasHovering) {
+                    triggerHaptic(40);
+                }
+
                 // 悬浮模式 (距离传感器 OR 触摸/长按)
                 // 忽略手机倾斜，重力反转向上
                 world.gravity.set(0, 8, 0); 
@@ -387,18 +405,32 @@
                 if(particles.position.y > 2) particles.position.y = 0;
 
             } else {
+                // 状态切换时触发一次轻微震动，模拟力场消失
+                if (wasHovering) {
+                    triggerHaptic(15);
+                }
+
                 // 普通模式：重力跟随手机倾斜
                 world.gravity.set(deviceGamma * 0.5, -deviceBeta * 0.5, 0);
                 
                 // 粒子恢复原位逻辑(简化)
                 particles.position.y *= 0.95;
             }
+            
+            // 更新上一帧状态
+            wasHovering = isHovering;
 
 
             // 1. 麦克风吹气检测 logic
             if (meter && !isHovering) { // 悬浮时优先响应悬浮
                 const level = meter.getValue(); 
                 if (level > -15) {
+                    // 吹气时的随机震动，模拟风的湍流
+                    // 为了避免震动过于密集导致麻木，稍微加个概率
+                    if (Math.random() > 0.8) {
+                        triggerHaptic(5); // 极短的震动
+                    }
+
                     const windStrength = 30;
                     sphereBody.applyForce(new CANNON.Vec3(
                         (Math.random() - 0.5) * windStrength,
@@ -470,6 +502,12 @@
                 const note = velocity > 10 ? "C4" : (velocity > 5 ? "G3" : "C3");
                 metalSynth.triggerAttackRelease(note, "8n");
                 
+                // 碰撞触觉反馈
+                // 速度越快，震动时间稍微越长 (但保持短促以获得"敲击"感)
+                // 限制最大震动时长，避免拖泥带水
+                const hapticDuration = Math.min(Math.floor(velocity * 2), 20);
+                triggerHaptic(hapticDuration);
+
                 if ((!meter || meter.getValue() <= -15) && !isHovering) {
                     innerCoreMesh.material.color.setHex(0xffffff);
                     setTimeout(() => { if(!isHovering) innerCoreMesh.material.color.setHex(0xff00ff) }, 100);
