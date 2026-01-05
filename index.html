@@ -47,12 +47,15 @@
             font-size: 10px;
             pointer-events: none;
             text-shadow: 0 0 5px #0ff;
+            width: 100%;
+            text-align: center;
         }
         #instructions {
             margin-top: 15px;
             font-size: 12px;
             opacity: 0.7;
             line-height: 1.6;
+            padding: 0 20px;
         }
     </style>
     <!-- 使用 Import Map 管理 ES Module 依赖 -->
@@ -76,7 +79,7 @@
         <div id="instructions">
             佩戴耳机体验最佳<br>
             倾斜设备控制核心 | 吹气产生风暴<br>
-            <span style="color: #ffd700;">挥手遮挡听筒隔空悬浮</span>
+            <span style="color: #ffd700;">iOS用户: 长按屏幕或遮挡听筒悬浮</span>
         </div>
     </div>
     <div id="debug">系统待机...</div>
@@ -97,7 +100,7 @@
         let synth, noiseSynth, metalSynth;
         let mic, meter; // 麦克风和电平表
         let isRunning = false;
-        let isHovering = false; // 距离传感器状态
+        let isHovering = false; // 距离传感器/触摸状态
         
         // 物理世界参数
         const boundarySize = 6; // 物理墙壁的范围
@@ -108,6 +111,8 @@
         init();
 
         function init() {
+            checkProtocol();
+
             // 1. Three.js 场景设置
             scene = new THREE.Scene();
             scene.fog = new THREE.FogExp2(0x000000, 0.03);
@@ -172,6 +177,15 @@
             btn.addEventListener('click', startExperience);
         }
 
+        // 检查 HTTPS
+        function checkProtocol() {
+            const isLocal = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+            const isHttps = location.protocol === 'https:';
+            if (!isHttps && !isLocal) {
+                alert("⚠️ iOS 重要提示：\n为了使用麦克风和陀螺仪，必须使用 HTTPS 协议访问。\n如果使用本地IP调试，请确保开启了HTTPS代理或使用 localhost。");
+            }
+        }
+
         function createBoundaries(material) {
             // 上下左右前后 6个面
             const thickness = 1;
@@ -230,52 +244,70 @@
 
         // --- 启动逻辑 (包含 Audio 初始化) ---
         async function startExperience() {
-            document.getElementById('ui-layer').style.display = 'none';
+            const btn = document.getElementById('start-btn');
+            btn.innerText = "启动中...";
+            
+            try {
+                // 1. 初始化 Audio Context (必须链式调用)
+                await Tone.start();
+                initAudio();
+                
+                // 尝试初始化麦克风
+                initMic(); 
 
-            // 1. 初始化 Audio Context
-            await Tone.start();
-            initAudio();
-            initMic(); // 初始化麦克风
+                // 2. 初始化传感器 (陀螺仪 + 距离传感器)
+                if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+                    // iOS 13+ 需要权限
+                    DeviceOrientationEvent.requestPermission()
+                        .then(permissionState => {
+                            if (permissionState === 'granted') {
+                                window.addEventListener('deviceorientation', handleOrientation);
+                            } else {
+                                alert('权限被拒绝：无法获取陀螺仪数据。');
+                            }
+                        })
+                        .catch(err => {
+                            console.error(err);
+                            alert('无法请求传感器权限，请确认使用的是 HTTPS。');
+                        });
+                } else {
+                    // 非 iOS 13+ 或 Android
+                    window.addEventListener('deviceorientation', handleOrientation);
+                }
 
-            // 2. 初始化传感器 (陀螺仪 + 距离传感器)
-            if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
-                DeviceOrientationEvent.requestPermission()
-                    .then(permissionState => {
-                        if (permissionState === 'granted') {
-                            window.addEventListener('deviceorientation', handleOrientation);
-                        } else {
-                            alert('需要传感器权限');
-                        }
-                    })
-                    .catch(console.error);
-            } else {
-                window.addEventListener('deviceorientation', handleOrientation);
-            }
+                // 距离传感器监听 (iOS 不支持，Android 支持)
+                if ('onuserproximity' in window) {
+                    window.addEventListener('userproximity', (event) => isHovering = event.near);
+                } else if ('ondeviceproximity' in window) {
+                    window.addEventListener('deviceproximity', (event) => isHovering = event.value < 5);
+                }
 
-            // 距离传感器监听 (Proximity)
-            if ('onuserproximity' in window) {
-                // Firefox 等浏览器支持的标准 API
-                window.addEventListener('userproximity', function(event) {
-                    isHovering = event.near;
+                // --- iOS 替代方案：触摸屏幕模拟“悬浮” ---
+                window.addEventListener('touchstart', (e) => { 
+                    // 防止多点触控导致的问题
+                    if(e.touches.length > 0) isHovering = true; 
                 });
-            } else if ('ondeviceproximity' in window) {
-                // 部分旧版 API
-                window.addEventListener('deviceproximity', function(event) {
-                    // 通常 value 小于某个阈值表示接近
-                    isHovering = event.value < 5; 
-                });
-            }
+                window.addEventListener('touchend', () => { isHovering = false; });
+                window.addEventListener('mousedown', () => { isHovering = true; }); // PC 鼠标测试
+                window.addEventListener('mouseup', () => { isHovering = false; });
 
-            // PC 调试模式
-            if (!/Mobi|Android/i.test(navigator.userAgent)) {
-                window.addEventListener('mousemove', handleMouseSimulate);
-                // PC 按下空格键模拟距离传感器遮挡
-                window.addEventListener('keydown', (e) => { if(e.code === 'Space') isHovering = true; });
-                window.addEventListener('keyup', (e) => { if(e.code === 'Space') isHovering = false; });
-            }
 
-            isRunning = true;
-            animate();
+                // PC 调试模式 (鼠标模拟陀螺仪)
+                if (!/Mobi|Android|iPhone/i.test(navigator.userAgent)) {
+                    window.addEventListener('mousemove', handleMouseSimulate);
+                    window.addEventListener('keydown', (e) => { if(e.code === 'Space') isHovering = true; });
+                    window.addEventListener('keyup', (e) => { if(e.code === 'Space') isHovering = false; });
+                }
+
+                // 隐藏 UI，开始循环
+                document.getElementById('ui-layer').style.display = 'none';
+                isRunning = true;
+                animate();
+
+            } catch (e) {
+                alert("启动失败: " + e.message);
+                btn.innerText = "重试";
+            }
         }
 
         function initAudio() {
@@ -312,7 +344,8 @@
                 meter = new Tone.Meter();
                 mic.connect(meter);
             } catch (e) {
-                console.warn("麦克风访问失败:", e);
+                console.warn("麦克风访问失败 (可能是权限或非HTTPS):", e);
+                // 不弹窗报错，以免打断体验，只是麦克风功能不可用
             }
         }
 
@@ -342,7 +375,7 @@
 
             // 0. 重力逻辑控制 (核心)
             if (isHovering) {
-                // 距离传感器激活：开启"隔空移物"模式
+                // 悬浮模式 (距离传感器 OR 触摸/长按)
                 // 忽略手机倾斜，重力反转向上
                 world.gravity.set(0, 8, 0); 
                 
@@ -427,9 +460,9 @@
             
             // 调试信息
             const micLevel = meter ? Math.round(meter.getValue()) : 'N/A';
-            const hoverState = isHovering ? "ACTIVE" : "OFF";
+            const hoverState = isHovering ? "ON" : "OFF";
             document.getElementById('debug').innerText = 
-                `G: ${Math.round(deviceGamma)},${Math.round(deviceBeta)} | Mic: ${micLevel}dB | Proximity: ${hoverState}`;
+                `G: ${Math.round(deviceGamma)},${Math.round(deviceBeta)} | Mic: ${micLevel} | Hover: ${hoverState}`;
         }
 
         function triggerBounce(velocity) {
