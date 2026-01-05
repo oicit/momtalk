@@ -75,8 +75,8 @@
         <button id="start-btn">初始化系统</button>
         <div id="instructions">
             佩戴耳机体验最佳<br>
-            倾斜设备控制核心<br>
-            <span style="color: #ff00ff;">对着麦克风吹气产生风暴</span>
+            倾斜设备控制核心 | 吹气产生风暴<br>
+            <span style="color: #ffd700;">挥手遮挡听筒隔空悬浮</span>
         </div>
     </div>
     <div id="debug">系统待机...</div>
@@ -95,8 +95,9 @@
         let world, sphereBody, wallMaterial;
         let coreMesh, innerCoreMesh, particles;
         let synth, noiseSynth, metalSynth;
-        let mic, meter; // 新增：麦克风和电平表
+        let mic, meter; // 麦克风和电平表
         let isRunning = false;
+        let isHovering = false; // 距离传感器状态
         
         // 物理世界参数
         const boundarySize = 6; // 物理墙壁的范围
@@ -135,7 +136,7 @@
 
             // 3. Cannon.js 物理世界设置
             world = new CANNON.World();
-            world.gravity.set(0, 0, 0); // 初始无重力，由手机倾斜控制
+            world.gravity.set(0, 0, 0); // 初始无重力
             world.broadphase = new CANNON.NaiveBroadphase();
             world.solver.iterations = 10;
 
@@ -188,9 +189,6 @@
             ceilBody.quaternion.setFromEuler(Math.PI, 0, 0);
             ceilBody.position.set(0, 0, 2);
             world.addBody(ceilBody);
-
-            // 四周墙壁 (简单处理：利用约束力或者反向重力，这里为了演示简单，我们只做简单的边界检查逻辑在 update 中，或者添加 4 个 Plane)
-            // 为了性能和简化，我们将在 update 循环中手动限制球体位置，制造"隐形墙"效果，比添加4个物理墙更省资源且不易穿模。
         }
 
         function createVisuals() {
@@ -234,13 +232,12 @@
         async function startExperience() {
             document.getElementById('ui-layer').style.display = 'none';
 
-            // 1. 初始化 Audio Context (必须在用户点击后)
-            // 这里的 Tone 指向全局加载的对象
+            // 1. 初始化 Audio Context
             await Tone.start();
             initAudio();
             initMic(); // 初始化麦克风
 
-            // 2. 请求陀螺仪权限 (iOS)
+            // 2. 初始化传感器 (陀螺仪 + 距离传感器)
             if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
                 DeviceOrientationEvent.requestPermission()
                     .then(permissionState => {
@@ -255,9 +252,26 @@
                 window.addEventListener('deviceorientation', handleOrientation);
             }
 
+            // 距离传感器监听 (Proximity)
+            if ('onuserproximity' in window) {
+                // Firefox 等浏览器支持的标准 API
+                window.addEventListener('userproximity', function(event) {
+                    isHovering = event.near;
+                });
+            } else if ('ondeviceproximity' in window) {
+                // 部分旧版 API
+                window.addEventListener('deviceproximity', function(event) {
+                    // 通常 value 小于某个阈值表示接近
+                    isHovering = event.value < 5; 
+                });
+            }
+
             // PC 调试模式
             if (!/Mobi|Android/i.test(navigator.userAgent)) {
                 window.addEventListener('mousemove', handleMouseSimulate);
+                // PC 按下空格键模拟距离传感器遮挡
+                window.addEventListener('keydown', (e) => { if(e.code === 'Space') isHovering = true; });
+                window.addEventListener('keyup', (e) => { if(e.code === 'Space') isHovering = false; });
             }
 
             isRunning = true;
@@ -265,7 +279,7 @@
         }
 
         function initAudio() {
-            // 背景低音 Drone (基于 FM 合成器)
+            // 背景低音 Drone
             synth = new Tone.FMSynth({
                 harmonicity: 3,
                 modulationIndex: 10,
@@ -276,14 +290,11 @@
                 modulationEnvelope: { attack: 0.5, decay: 0, sustain: 1, release: 0.5 }
             }).toDestination();
             
-            // 添加混响让声音更空灵
             const reverb = new Tone.Reverb(2).toDestination();
             synth.connect(reverb);
-            
-            // 启动底噪
             synth.triggerAttack("C2"); 
 
-            // 碰撞音效 (金属打击声)
+            // 碰撞音效
             metalSynth = new Tone.MembraneSynth({
                 pitchDecay: 0.05,
                 octaves: 4,
@@ -293,45 +304,32 @@
             metalSynth.connect(reverb);
         }
 
-        // 新增：初始化麦克风
         async function initMic() {
             try {
-                // Tone.UserMedia 用于获取麦克风流
                 mic = new Tone.UserMedia();
                 await mic.open();
                 console.log("麦克风已连接");
-                
-                // Tone.Meter 用于测量音量 (分贝值)
                 meter = new Tone.Meter();
                 mic.connect(meter);
             } catch (e) {
-                console.warn("麦克风访问失败 (请确保使用 HTTPS 或本地环境):", e);
+                console.warn("麦克风访问失败:", e);
             }
         }
 
         // --- 交互处理 ---
         function handleOrientation(event) {
-            // 将角度 (-180 到 180) 转换为物理世界的重力向量
-            // 这是一个简单的映射：倾斜手机 = 改变重力方向
-            const x = event.gamma || 0; // 左右翻转
-            const y = event.beta || 0;  // 前后翻转
-
+            // 我们只更新变量，不在事件回调中直接设置物理重力，
+            // 这样可以在 animate 循环中处理"悬浮"的重力覆盖逻辑
+            const x = event.gamma || 0; // 左右
+            const y = event.beta || 0;  // 前后
             deviceGamma = x;
             deviceBeta = y;
-
-            if (world) {
-                // Cannon.js 的重力设置 (放大系数 0.5 让球动得快一点)
-                world.gravity.set(x * 0.5, -y * 0.5, 0);
-            }
         }
 
         function handleMouseSimulate(event) {
-            // PC 鼠标模拟重力
             const x = (event.clientX / window.innerWidth) * 2 - 1;
             const y = (event.clientY / window.innerHeight) * 2 - 1;
-            if (world) {
-                world.gravity.set(x * 20, -y * 20, 0); // PC 上给大一点的力
-            }
+            // 模拟数据放大
             deviceGamma = x * 45;
             deviceBeta = y * 45;
         }
@@ -342,27 +340,46 @@
 
             if (!isRunning) return;
 
-            // 1. 麦克风吹气检测 logic (NEW)
-            if (meter) {
-                const level = meter.getValue(); // 获取分贝值 (通常在 -Infinity 到 0 之间)
-                // 吹气通常会产生很大的白噪声，阈值设为 -15dB 左右比较合适
+            // 0. 重力逻辑控制 (核心)
+            if (isHovering) {
+                // 距离传感器激活：开启"隔空移物"模式
+                // 忽略手机倾斜，重力反转向上
+                world.gravity.set(0, 8, 0); 
+                
+                // 视觉反馈：变为金色
+                innerCoreMesh.material.color.setHex(0xffd700);
+                
+                // 粒子特效：向上飞升
+                particles.position.y += 0.02;
+                if(particles.position.y > 2) particles.position.y = 0;
+
+            } else {
+                // 普通模式：重力跟随手机倾斜
+                world.gravity.set(deviceGamma * 0.5, -deviceBeta * 0.5, 0);
+                
+                // 粒子恢复原位逻辑(简化)
+                particles.position.y *= 0.95;
+            }
+
+
+            // 1. 麦克风吹气检测 logic
+            if (meter && !isHovering) { // 悬浮时优先响应悬浮
+                const level = meter.getValue(); 
                 if (level > -15) {
-                    // 施加混乱的“风力”
                     const windStrength = 30;
                     sphereBody.applyForce(new CANNON.Vec3(
                         (Math.random() - 0.5) * windStrength,
-                        (Math.random() - 0.5) * windStrength + 10, // 稍微向上吹
+                        (Math.random() - 0.5) * windStrength + 10,
                         (Math.random() - 0.5) * windStrength
                     ), sphereBody.position);
 
-                    // 视觉反馈：核心过载变白
                     innerCoreMesh.material.color.setHex(0xffffff);
-                    // 粒子加速旋转
                     particles.rotation.z += 0.2;
                 } else {
-                     // 恢复原本的紫色 (如果有碰撞变色，这里做一个简单的渐变恢复或者延迟)
-                     if (innerCoreMesh.material.color.getHex() === 0xffffff && Math.random() > 0.9) {
-                         innerCoreMesh.material.color.setHex(0xff00ff);
+                     // 恢复紫色 (如果没在悬浮)
+                     if (innerCoreMesh.material.color.getHex() !== 0xff00ff && !isHovering) {
+                         // 简单的颜色平滑过渡模拟
+                         if (Math.random() > 0.9) innerCoreMesh.material.color.setHex(0xff00ff);
                      }
                 }
             }
@@ -370,12 +387,11 @@
             // 2. 更新物理世界
             world.step(1 / 60);
 
-            // 手动边界限制 (简单的箱体碰撞逻辑)
-            const limitX = 3.5; // 屏幕宽度限制
-            const limitY = 6.0; // 屏幕高度限制
+            // 手动边界限制
+            const limitX = 3.5;
+            const limitY = 6.0;
             const vel = sphereBody.velocity;
             
-            // X轴碰撞
             if (sphereBody.position.x > limitX) {
                 sphereBody.position.x = limitX;
                 if(vel.x > 0) { vel.x *= -0.8; triggerBounce(Math.abs(vel.x)); }
@@ -384,7 +400,6 @@
                 if(vel.x < 0) { vel.x *= -0.8; triggerBounce(Math.abs(vel.x)); }
             }
 
-            // Y轴碰撞
             if (sphereBody.position.y > limitY) {
                 sphereBody.position.y = limitY;
                 if(vel.y > 0) { vel.y *= -0.8; triggerBounce(Math.abs(vel.y)); }
@@ -393,21 +408,18 @@
                 if(vel.y < 0) { vel.y *= -0.8; triggerBounce(Math.abs(vel.y)); }
             }
 
-            // Z轴锁定 (只在平面运动)
             sphereBody.position.z = 0;
             sphereBody.velocity.z = 0;
 
-            // 3. 同步视觉物体位置
+            // 3. 同步视觉物体
             innerCoreMesh.position.copy(sphereBody.position);
-            // 让外部线框稍微延迟跟随内部核心，产生果冻般的拖拽感
             coreMesh.position.lerp(sphereBody.position, 0.1);
             
-            // 旋转效果
             coreMesh.rotation.x += 0.02;
             coreMesh.rotation.y += 0.02;
-            particles.rotation.y = deviceGamma * 0.01; // 粒子背景随手机微动
+            if(!isHovering) particles.rotation.y = deviceGamma * 0.01;
 
-            // 4. Audio 反馈逻辑 (重力乐器)
+            // 4. Audio 反馈
             updateAudio();
 
             // 5. 渲染
@@ -415,39 +427,29 @@
             
             // 调试信息
             const micLevel = meter ? Math.round(meter.getValue()) : 'N/A';
+            const hoverState = isHovering ? "ACTIVE" : "OFF";
             document.getElementById('debug').innerText = 
-                `G: X${world.gravity.x.toFixed(1)} Y${world.gravity.y.toFixed(1)} | Mic: ${micLevel}dB`;
+                `G: ${Math.round(deviceGamma)},${Math.round(deviceBeta)} | Mic: ${micLevel}dB | Proximity: ${hoverState}`;
         }
 
         function triggerBounce(velocity) {
-            // 只有撞击速度够快才发声
             if (velocity > 2) {
-                // 速度越快，音调越高
                 const note = velocity > 10 ? "C4" : (velocity > 5 ? "G3" : "C3");
                 metalSynth.triggerAttackRelease(note, "8n");
                 
-                // 撞击时核心闪烁白色 (如果没在吹气)
-                if (!meter || meter.getValue() <= -15) {
+                if ((!meter || meter.getValue() <= -15) && !isHovering) {
                     innerCoreMesh.material.color.setHex(0xffffff);
-                    setTimeout(() => innerCoreMesh.material.color.setHex(0xff00ff), 100);
+                    setTimeout(() => { if(!isHovering) innerCoreMesh.material.color.setHex(0xff00ff) }, 100);
                 }
             }
         }
 
         function updateAudio() {
             if (!synth) return;
-
-            // 获取球体当前速度 magnitude
             const speed = sphereBody.velocity.length();
-
-            // 根据速度改变 Drone 的调制指数 (Modulation Index)，速度越快声音越"躁"
-            // clamp(val, min, max)
             const modulation = Math.min(Math.max(speed * 2, 5), 50);
             synth.modulationIndex.rampTo(modulation, 0.1);
-
-            // 根据屏幕垂直位置改变音调微调 (Detune)
-            // 球越往上，音调越高
-            const detuneVal = sphereBody.position.y * 100; // +/- 600 cents
+            const detuneVal = sphereBody.position.y * 100;
             synth.detune.rampTo(detuneVal, 0.1);
         }
 
