@@ -52,6 +52,7 @@
             margin-top: 15px;
             font-size: 12px;
             opacity: 0.7;
+            line-height: 1.6;
         }
     </style>
     <!-- 使用 Import Map 管理 ES Module 依赖 -->
@@ -72,7 +73,11 @@
     <div id="ui-layer">
         <h1>NEON GRAVITY CORE</h1>
         <button id="start-btn">初始化系统</button>
-        <div id="instructions">佩戴耳机体验最佳<br>倾斜设备控制核心</div>
+        <div id="instructions">
+            佩戴耳机体验最佳<br>
+            倾斜设备控制核心<br>
+            <span style="color: #ff00ff;">对着麦克风吹气产生风暴</span>
+        </div>
     </div>
     <div id="debug">系统待机...</div>
 
@@ -90,6 +95,7 @@
         let world, sphereBody, wallMaterial;
         let coreMesh, innerCoreMesh, particles;
         let synth, noiseSynth, metalSynth;
+        let mic, meter; // 新增：麦克风和电平表
         let isRunning = false;
         
         // 物理世界参数
@@ -232,6 +238,7 @@
             // 这里的 Tone 指向全局加载的对象
             await Tone.start();
             initAudio();
+            initMic(); // 初始化麦克风
 
             // 2. 请求陀螺仪权限 (iOS)
             if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
@@ -286,6 +293,22 @@
             metalSynth.connect(reverb);
         }
 
+        // 新增：初始化麦克风
+        async function initMic() {
+            try {
+                // Tone.UserMedia 用于获取麦克风流
+                mic = new Tone.UserMedia();
+                await mic.open();
+                console.log("麦克风已连接");
+                
+                // Tone.Meter 用于测量音量 (分贝值)
+                meter = new Tone.Meter();
+                mic.connect(meter);
+            } catch (e) {
+                console.warn("麦克风访问失败 (请确保使用 HTTPS 或本地环境):", e);
+            }
+        }
+
         // --- 交互处理 ---
         function handleOrientation(event) {
             // 将角度 (-180 到 180) 转换为物理世界的重力向量
@@ -319,7 +342,32 @@
 
             if (!isRunning) return;
 
-            // 1. 更新物理世界
+            // 1. 麦克风吹气检测 logic (NEW)
+            if (meter) {
+                const level = meter.getValue(); // 获取分贝值 (通常在 -Infinity 到 0 之间)
+                // 吹气通常会产生很大的白噪声，阈值设为 -15dB 左右比较合适
+                if (level > -15) {
+                    // 施加混乱的“风力”
+                    const windStrength = 30;
+                    sphereBody.applyForce(new CANNON.Vec3(
+                        (Math.random() - 0.5) * windStrength,
+                        (Math.random() - 0.5) * windStrength + 10, // 稍微向上吹
+                        (Math.random() - 0.5) * windStrength
+                    ), sphereBody.position);
+
+                    // 视觉反馈：核心过载变白
+                    innerCoreMesh.material.color.setHex(0xffffff);
+                    // 粒子加速旋转
+                    particles.rotation.z += 0.2;
+                } else {
+                     // 恢复原本的紫色 (如果有碰撞变色，这里做一个简单的渐变恢复或者延迟)
+                     if (innerCoreMesh.material.color.getHex() === 0xffffff && Math.random() > 0.9) {
+                         innerCoreMesh.material.color.setHex(0xff00ff);
+                     }
+                }
+            }
+
+            // 2. 更新物理世界
             world.step(1 / 60);
 
             // 手动边界限制 (简单的箱体碰撞逻辑)
@@ -349,7 +397,7 @@
             sphereBody.position.z = 0;
             sphereBody.velocity.z = 0;
 
-            // 2. 同步视觉物体位置
+            // 3. 同步视觉物体位置
             innerCoreMesh.position.copy(sphereBody.position);
             // 让外部线框稍微延迟跟随内部核心，产生果冻般的拖拽感
             coreMesh.position.lerp(sphereBody.position, 0.1);
@@ -359,15 +407,16 @@
             coreMesh.rotation.y += 0.02;
             particles.rotation.y = deviceGamma * 0.01; // 粒子背景随手机微动
 
-            // 3. Audio 反馈逻辑 (重力乐器)
+            // 4. Audio 反馈逻辑 (重力乐器)
             updateAudio();
 
-            // 4. 渲染
+            // 5. 渲染
             composer.render();
             
             // 调试信息
+            const micLevel = meter ? Math.round(meter.getValue()) : 'N/A';
             document.getElementById('debug').innerText = 
-                `G-Force: X${world.gravity.x.toFixed(1)} Y${world.gravity.y.toFixed(1)}`;
+                `G: X${world.gravity.x.toFixed(1)} Y${world.gravity.y.toFixed(1)} | Mic: ${micLevel}dB`;
         }
 
         function triggerBounce(velocity) {
@@ -377,9 +426,11 @@
                 const note = velocity > 10 ? "C4" : (velocity > 5 ? "G3" : "C3");
                 metalSynth.triggerAttackRelease(note, "8n");
                 
-                // 撞击时核心闪烁白色
-                innerCoreMesh.material.color.setHex(0xffffff);
-                setTimeout(() => innerCoreMesh.material.color.setHex(0xff00ff), 100);
+                // 撞击时核心闪烁白色 (如果没在吹气)
+                if (!meter || meter.getValue() <= -15) {
+                    innerCoreMesh.material.color.setHex(0xffffff);
+                    setTimeout(() => innerCoreMesh.material.color.setHex(0xff00ff), 100);
+                }
             }
         }
 
