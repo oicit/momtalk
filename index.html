@@ -1,534 +1,627 @@
 <!DOCTYPE html>
-<html lang="zh">
+<html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>霓虹重力核心 PRO</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>夏威夷大岛大冒险 - 完整内容蛇形对齐版</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;700;800;900&family=Noto+Sans+SC:wght@400;700;900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
     <style>
-        body { margin: 0; overflow: hidden; background-color: #050505; font-family: 'Courier New', Courier, monospace; }
-        canvas { display: block; }
-        #ui-layer {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            text-align: center;
-            color: #0ff;
-            z-index: 10;
-            pointer-events: none;
-            width: 100%;
+        :root {
+            --duo-green: #58cc02;
+            --duo-blue: #1cb0f6;
+            --duo-orange: #ff9600;
+            --duo-purple: #ce82ff;
+            --duo-red: #ff4b4b;
+            --duo-yellow: #ffc800;
         }
-        h1 {
-            font-size: 24px;
-            text-shadow: 0 0 10px #0ff;
-            margin-bottom: 30px;
-            letter-spacing: 4px;
+        body {
+            font-family: 'Nunito', 'Noto Sans SC', sans-serif;
+            background-color: #f7f7f7;
+            color: #4b4b4b;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            margin: 0;
         }
-        #start-btn {
-            pointer-events: auto;
-            background: rgba(0, 0, 0, 0.6);
-            border: 2px solid #0ff;
-            color: #0ff;
-            padding: 15px 40px;
-            font-size: 16px;
-            text-transform: uppercase;
-            letter-spacing: 2px;
+        .duo-card {
+            border: 2px solid #e5e5e5;
+            border-bottom: 6px solid #e5e5e5;
+        }
+        
+        /* 时间轴节点样式 */
+        .step-circle {
+            width: 70px;
+            height: 60px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto;
+            border-bottom: 6px solid rgba(0,0,0,0.2);
             cursor: pointer;
-            transition: all 0.3s;
-            box-shadow: 0 0 15px #0ff, inset 0 0 10px rgba(0, 255, 255, 0.2);
+            transition: all 0.2s ease;
+            position: relative;
+            z-index: 10;
+            background-color: white;
+        }
+        .step-circle.active {
+            transform: scale(1.1);
+            box-shadow: 0 0 0 8px rgba(28, 176, 246, 0.2);
+            border-bottom-width: 2px;
+        }
+        #map { height: 100%; width: 100%; z-index: 1; border-radius: 0; }
+        
+        /* 地图标注样式 */
+        .day-label {
+            background: transparent;
+            font-weight: 950;
+            font-size: 20px; 
+            text-align: center;
+            white-space: nowrap;
+            color: #fff;
+            text-shadow: 
+                -1.2px -1.2px 0 #000, 1.2px -1.2px 0 #000, 
+                -1.2px 1.2px 0 #000, 1.2px 1.2px 0 #000;
+            pointer-events: none;
+        }
+
+        .plane-marker {
+            font-size: 32px;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.3);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        /* POI 兴趣点图标 */
+        .poi-marker {
+            font-size: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: white;
+            border: 2px solid #e5e5e5;
+            border-radius: 50%;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+            width: 32px;
+            height: 32px;
+        }
+
+        /* 蛇形进度网格 */
+        .path-grid {
+            position: relative;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            grid-auto-rows: 150px;
+            gap: 0 20px;
+            padding: 40px 20px;
+        }
+        
+        /* 蛇形连接线 */
+        .snake-line {
+            position: absolute;
+            background: #e5e5e5;
+            z-index: 1;
             border-radius: 4px;
         }
-        #start-btn:active { background: #0ff; color: #000; box-shadow: 0 0 30px #0ff; }
-        #debug {
-            position: absolute;
-            bottom: 15px;
-            left: 15px;
-            color: rgba(0, 255, 255, 0.7);
-            font-size: 10px;
-            pointer-events: none;
-            text-shadow: 0 0 5px #0ff;
-            width: 100%;
-            text-align: center;
+        .line-h { height: 8px; }
+        .line-v { width: 8px; }
+
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.6);
+            z-index: 2000;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+            backdrop-filter: blur(4px);
         }
-        #instructions {
-            margin-top: 15px;
-            font-size: 12px;
-            opacity: 0.7;
-            line-height: 1.6;
-            padding: 0 20px;
+        .custom-scroll::-webkit-scrollbar { width: 8px; }
+        .custom-scroll::-webkit-scrollbar-thumb { background: #ccc; border-radius: 10px; }
+        
+        .toggle-btn {
+            background-color: #fff; border: 2px solid #e5e5e5; border-bottom: 4px solid #e5e5e5;
+            padding: 4px 12px; border-radius: 12px; font-weight: 800; cursor: pointer; transition: all 0.1s;
+        }
+        .toggle-btn.active { background-color: #58cc02; color: white; border-color: #46a302; }
+        
+        /* Map Control Buttons */
+        .map-btn {
+            background-color: #fff;
+            border: 2px solid #e5e5e5;
+            border-bottom: 4px solid #e5e5e5;
+            padding: 8px 16px;
+            border-radius: 12px;
+            font-weight: 800;
+            cursor: pointer;
+            transition: all 0.1s;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
+            font-size: 14px;
+            white-space: nowrap;
+        }
+        .map-btn:active {
+            border-bottom-width: 2px;
+            transform: translateY(2px);
+        }
+
+        .timeline-day-text {
+            font-size: 24px;
+            font-weight: 900;
+            margin-bottom: 2px;
+        }
+        .timeline-title-text {
+            font-size: 18px;
+            font-weight: 700;
+            line-height: 1.2;
+            margin-top: 4px;
+        }
+
+        .section-title { font-weight: 900; font-size: 14px; text-transform: uppercase; color: #afafaf; margin-bottom: 15px; border-bottom: 2px solid #f0f0f0; padding-bottom: 5px; }
+        .editable-field:focus { outline: 2px solid var(--duo-blue); background: #fff; border-radius: 4px; padding: 2px; }
+        .comment-box { border: 2px dashed #e5e5e5; padding: 15px; border-radius: 20px; margin-top: 25px; background: #fff; }
+        .drag-handle { cursor: grab; color: #ccc; display: none; margin-right: 10px; }
+        .edit-mode .drag-handle { display: flex; }
+
+        /* 航线流动动画 */
+        @keyframes dash-flow {
+            from { stroke-dashoffset: 40; }
+            to { stroke-dashoffset: 0; }
+        }
+        .route-path-flow {
+            stroke-dasharray: 15, 25;
+            animation: dash-flow 2s linear infinite;
+        }
+        /* 箭头图标样式 */
+        .arrow-icon {
+            font-size: 18px;
+            color: #1cb0f6;
+            text-shadow: 0 0 4px white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            pointer-events: none;
+            opacity: 0.9;
         }
     </style>
-    <!-- 使用 Import Map 管理 ES Module 依赖 -->
-    <script type="importmap">
-        {
-            "imports": {
-                "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
-                "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
-                "cannon-es": "https://unpkg.com/cannon-es@0.20.0/dist/cannon-es.js"
-            }
-        }
-    </script>
-    <!-- 修复：通过全局 Script 标签加载 Tone.js 以避免 ESM 导入错误 -->
-    <script src="https://unpkg.com/tone@14.7.77/build/Tone.js"></script>
 </head>
-<body>
+<body class="edit-mode-disabled">
 
-    <div id="ui-layer">
-        <h1>NEON GRAVITY CORE</h1>
-        <button id="start-btn">初始化系统</button>
-        <div id="instructions">
-            佩戴耳机体验最佳<br>
-            倾斜设备控制核心 | 吹气产生风暴<br>
-            <span style="color: #ffd700;">iOS用户: 长按屏幕或遮挡听筒悬浮</span>
+    <!-- 顶部导航栏：包含标题和描述 -->
+    <nav class="bg-white border-b-2 border-gray-200 px-6 py-2 flex justify-between items-center shrink-0 z-50 shadow-sm">
+        <div class="flex items-center gap-4">
+            <span class="text-4xl">🌴</span>
+            <div class="flex flex-col">
+                <h1 class="font-black text-xl md:text-2xl tracking-tight text-[#58cc02] leading-none" id="nav-title">夏威夷大岛大冒险</h1>
+                <p class="text-[10px] md:text-xs font-bold text-gray-400 mt-1" id="nav-desc">从看火山口岩浆到绝美沙滩和深邃海底！</p>
+            </div>
+        </div>
+        <div class="flex gap-4 items-center">
+            <button onclick="toggleEditMode()" class="toggle-btn" id="edit-toggle">📝 <span class="lang-target" data-zh="编辑" data-en="EDIT">编辑</span></button>
+            <button onclick="toggleLanguage()" class="toggle-btn" id="lang-toggle">中 / EN</button>
+            <div class="w-10 h-10 rounded-full bg-blue-400 border-2 border-blue-500 overflow-hidden shadow-sm">
+                <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=Felix" alt="avatar">
+            </div>
+        </div>
+    </nav>
+
+    <div class="flex flex-col md:flex-row flex-1 overflow-hidden">
+        <!-- 地图区域 -->
+        <div class="w-full md:w-[65%] h-[40vh] md:h-full border-r-2 border-gray-200 relative">
+            <div id="map"></div>
+            <!-- 地图控制按钮组 -->
+            <div class="absolute top-4 right-4 z-[1000] flex flex-col gap-2 items-end">
+                <button onclick="resetMapView()" class="map-btn shadow-md hover:bg-gray-50">
+                    🏠 <span id="reset-view-text">重置视图</span>
+                </button>
+                <button onclick="togglePoiVisibility()" class="map-btn shadow-md hover:bg-gray-50">
+                    📍 <span id="poi-toggle-text">隐藏景点</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- 时间轴进度区域 -->
+        <div id="timelineContainer" class="w-full md:w-[35%] h-full overflow-y-auto custom-scroll bg-white p-4 md:p-6 text-center">
+            <div class="max-w-[320px] mx-auto">
+                <h2 class="font-black text-xl mb-1" id="timeline-title">冒险路径</h2>
+                <p class="text-gray-400 font-extrabold uppercase tracking-widest text-[9px]">SNAKE PROGRESSION</p>
+                <div class="path-grid mt-4" id="path-grid"></div>
+            </div>
         </div>
     </div>
-    <div id="debug">系统待机...</div>
 
-    <script type="module">
-        import * as THREE from 'three';
-        import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
-        import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
-        import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
-        import * as CANNON from 'cannon-es';
+    <!-- 详情弹窗 -->
+    <div id="dayModal" class="modal" onclick="closeModal(event)">
+        <div class="bg-white rounded-3xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[85vh] shadow-2xl" onclick="event.stopPropagation()">
+            <div id="modalHeader" class="p-4 md:p-5 text-white shrink-0 relative">
+                <button class="absolute top-4 right-6 text-3xl font-bold opacity-70 hover:opacity-100" onclick="closeModal()">×</button>
+                <div class="inline-block bg-white/20 px-3 py-1 rounded-full text-[10px] font-black mb-1 uppercase tracking-widest lang-target" data-zh="探险任务" data-en="MISSION">探险任务</div>
+                <h2 id="modalTitle" class="text-2xl md:text-3xl font-black leading-tight"></h2>
+                <p id="modalDate" class="text-sm font-bold opacity-90"></p>
+            </div>
+            <div class="p-6 md:p-8 overflow-y-auto custom-scroll bg-[#fcfcfc] flex-1 text-left" id="modalContent"></div>
+            <div id="save-indicator" class="hidden p-2 bg-green-100 text-green-700 text-center text-xs font-bold">✓ 已保存 / Saved</div>
+        </div>
+    </div>
+
+    <script>
+        let currentLang = 'zh';
+        let editMode = false;
+        let poisVisible = true;
+        let leafletMap = null;
+        let activeMarkers = [];
+        let activeLabels = [];
+        let activePois = [];
         
-        // 注意：Tone.js 现在作为全局对象 'Tone' 直接使用，无需 import
+        // 本地存储
+        let userEdits = JSON.parse(localStorage.getItem('hawaii_adventure_v1')) || {};
 
-        // --- 变量定义 ---
-        let scene, camera, renderer, composer;
-        let world, sphereBody, wallMaterial;
-        let coreMesh, innerCoreMesh, particles;
-        let synth, noiseSynth, metalSynth;
-        let mic, meter; // 麦克风和电平表
-        let isRunning = false;
-        let isHovering = false; // 距离传感器/触摸状态
-        let wasHovering = false; // 记录上一帧的悬浮状态，用于触发状态改变时的震动
-        
-        // 物理世界参数
-        const boundarySize = 6; // 物理墙壁的范围
+        const CRATER_COORD = [19.412, -155.285];
+        const INITIAL_MAP_CENTER = [19.7, -155.5];
+        const INITIAL_MAP_ZOOM = 9;
 
-        // 陀螺仪数据
-        let deviceBeta = 0, deviceGamma = 0;
+        const itinerary = {
+            1: { zh: { title: "抵达与红光夜影 🌋", date: "Day 1", timeline: "抵达与红光", expert: "💡 专家建议：夜晚高海拔寒冷，请为奶奶和孩子备好轻便外套。望远镜是看火山口细节的神器。检查“After Dark in the Park”讲座计划。" }, en: { title: "Arrival & Glow 🌋", date: "Day 1", timeline: "Arrival", expert: "💡 EXPERT: Evenings are chilly—pack layers! Use binoculars for crater viewing. Check the 'After Dark in the Park' lecture series." }, color: "#ff4b4b", coords: CRATER_COORD, labelOffset: [40, 40], pois: [
+                { icon: "🐢", zh: "Punaluʻu 黑沙滩", en: "Punaluʻu Black Sand", coords: [19.135, -155.503] },
+                { icon: "🌫️", zh: "Steaming Bluff 蒸汽孔", en: "Steaming Bluff", coords: [19.422, -155.263] },
+                { icon: "🛖", zh: "Volcano Village 火山村", en: "Volcano Village", coords: [19.428, -155.234] }
+            ], events: [
+                { id: 0, icon: "🛫", zh: { name: "落地科纳与驾驶", time: "1:13 PM 降落", desc: "取车后沿 Saddle Road 驾驶景观极佳。中途在 Punaluʻu 黑沙滩停留寻找海龟。保持 10 英尺距离规则。" }, en: { name: "Arrival & Drive", time: "1:13 PM", desc: "Pick up car and drive via Saddle Road. Stop at Punaluʻu Black Sand Beach to see turtles. Keep 10ft distance." } },
+                { id: 1, icon: "🛖", zh: { name: "入住 Volcano Village", time: "下午", desc: "入住雨林区 Volcano Village。此处比科纳寒冷，请准备好外套。在村庄市场补充物资。" }, en: { name: "Check-in Volcano", time: "Afternoon", desc: "Check in at Volcano Village. It's much cooler than Kona—pack layers! Stock up at market." } },
+                { id: 2, icon: "🔥", zh: { name: "火山口红光观赏", time: "入夜", desc: "前往 Kīlauea Overlook 或 Steaming Bluff 观察 Halemaʻumaʻu 红光。这是观看熔岩湖的最佳时机。" }, en: { name: "Evening Glow", time: "Night", desc: "View the glow at Halemaʻumaʻu from Kīlauea Overlook or Steaming Bluff overlooks." } }
+            ]},
+            2: { zh: { title: "火山深度探索 🌋", date: "Day 2", timeline: "深度探索", expert: "💡 专家建议：瑟斯顿熔岩管建议 9AM 前访问。Ha‘akulamanu (Sulphur Banks) 步道平坦，适合奶奶。" }, en: { title: "Explorer Day 🌋", date: "Day 2", timeline: "Explorer", expert: "💡 EXPERT: Visit Thurston Lava Tube before 9AM. Ha‘akulamanu is flat and accessible for elders." }, color: "#ff9600", coords: [19.412, -155.245], labelOffset: [-10, 0], pois: [
+                { icon: "🕳️", zh: "Thurston 熔岩隧道", en: "Thurston Lava Tube", coords: [19.414, -155.239] },
+                { icon: "🗿", zh: "Pu‘uloa 古石刻", en: "Pu‘uloa Petroglyphs", coords: [19.286, -155.127] },
+                { icon: "💨", zh: "Sulphur Banks", en: "Sulphur Banks", coords: [19.431, -155.258] }
+            ], events: [
+                { id: 0, icon: "🌋", zh: { name: "Kilauea Iki 环线", time: "早晨", desc: "徒步 4 英里环线。穿越凝固的熔岩湖，感受大自然的力量。随后访问拥有 500 年历史的 Thurston 熔岩隧道。" }, en: { name: "Kilauea Iki Loop", time: "Morning", desc: "Hike the 4-mile loop crossing a former lava lake. Visit the 500-year-old Thurston Lava Tube cave." } },
+                { id: 1, icon: "💨", zh: { name: "琉磺堤与蒸汽孔", time: "上午", desc: "行走 Ha‘akulamanu 步道看火山气体喷发。中午在 Volcano House 享用午餐俯瞰火山口。" }, en: { name: "Sulphur Banks", time: "AM", desc: "Walk the easy 1.2-mile Ha‘akulamanu Trail. Lunch at Volcano House overlooking the crater." } },
+                { id: 2, icon: "🗿", zh: { name: "链路路与古石刻", time: "下午", desc: "驾驶 Chain of Craters Road 23 英里。在 Pu‘uloa 观察 2.3 万个古石刻。完成 Junior Ranger 手册领勋章。" }, en: { name: "Petroglyphs Drive", time: "PM", desc: "Drive the 23-mile Chain of Craters Road. See 23,000 carvings at Pu‘uloa. Complete Junior Ranger booklet." } }
+            ]},
+            3: { zh: { title: "希洛科学与瀑布之旅", date: "Day 3", timeline: "雨林科学", expert: "💡 专家建议：希洛早晨易见彩虹。‘Akaka 瀑布落差 442 英尺，但步道有楼梯，请注意体力。" }, en: { title: "Hilo Science", date: "Day 3", timeline: "Science", expert: "💡 EXPERT: Rainbows are common in Hilo. Akaka Falls is a 442ft drop, but note stairs on the trail." }, color: "#58cc02", coords: [19.724, -155.087], pois: [
+                { icon: "🐒", zh: "Panaʻewa 雨林动物园", en: "Panaʻewa Zoo", coords: [19.664, -155.074] },
+                { icon: "🌈", zh: "彩虹瀑布", en: "Rainbow Falls", coords: [19.719, -155.110] },
+                { icon: "🌊", zh: "阿卡卡瀑布", en: "Akaka Falls", coords: [19.854, -155.153] },
+                { icon: "🔭", zh: "ʻImiloa 天文中心", en: "ʻImiloa Astronomy", coords: [19.702, -155.081] },
+                { icon: "📐", zh: "Lyman 博物馆", en: "Lyman Museum", coords: [19.722, -155.088] }
+            ], events: [
+                { id: 0, icon: "🐵", zh: { name: "雨林动物园", time: "早晨", desc: "访问 Panaʻewa 动物园。看蜘蛛猴、尼尼鹅和兰花花园。这是全美唯一的雨林动物园。" }, en: { name: "Rainforest Zoo", time: "AM", desc: "Visit Panaʻewa Zoo. See monkeys, lemurs, and nēnē. It's also a botanical garden." } },
+                { id: 1, icon: "🌈", zh: { name: "希洛科学与瀑布", time: "上午", desc: "看彩虹瀑布。参观 Lyman 博物馆了解自然历史。或去 ‘Imiloa 天文中心看球幕电影。" }, en: { name: "Hilo Science", time: "AM", desc: "Visit Rainbow Falls. Explore Lyman Museum or ʻImiloa Astronomy Center's planetarium." } },
+                { id: 2, icon: "🌊", zh: { name: "阿卡卡瀑布", time: "下午", desc: "沿哈马库亚海岸驾驶。徒步 0.4 英里路径看 442 英尺高的阿卡卡瀑布。随后前往 Waikoloa 入住。" }, en: { name: "Akaka Falls", time: "PM", desc: "Drive Hamakua Coast. Hike to Akaka Falls (442ft). Continue to Paniolo Greens." } }
+            ]},
+            4: { zh: { title: "北科哈拉：牛仔文化 🐎", date: "Day 4", timeline: "牛仔文化", expert: "💡 专家建议：周四晚 Kings' Shops 常有草裙舞。Keiki 博物馆（门票$10-15）适合孩子消耗体力。" }, en: { title: "Cowboy Culture 🐎", date: "Day 4", timeline: "Paniolo", expert: "💡 EXPERT: Thursday hula at Kings' Shops. Keiki Museum ($10-15) is great for kids' energy." }, color: "#ce82ff", coords: [20.02, -155.66], pois: [
+                { icon: "🐎", zh: "Parker Ranch 牧场", en: "Parker Ranch", coords: [20.021, -155.666] },
+                { icon: "⛱️", zh: "Hapuna 白沙滩", en: "Hapuna Beach", coords: [19.992, -155.825] },
+                { icon: "🐝", zh: "Big Island Bees", en: "Big Island Bees", coords: [19.475, -155.898] },
+                { icon: "🗿", zh: "Puako 石刻", en: "Puako Petroglyphs", coords: [19.923, -155.856] }
+            ], events: [
+                { id: 0, icon: "⛱️", zh: { name: "沙滩上午", time: "上午", desc: "在 Hapuna 或 Waialea Bay 享受白沙滩与温和海浪。随后访问 Kings' Shops 的 Keiki 科学博物馆。" }, en: { name: "Beach Morning", time: "AM", desc: "Enjoy Hapuna or Waialea Beach. Visit Hawaii Keiki Museum in Waikoloa." } },
+                { id: 1, icon: "🤠", zh: { name: "牛仔文化与威美亚", time: "下午", desc: "参观 Parker Ranch 了解牛仔历史。或去 Big Island Bees 体验蜂蜜品鉴。北行可看 Pololū 谷美景。" }, en: { name: "Paniolo Culture", time: "PM", desc: "Parker Ranch history. Honey tasting at Big Island Bees. Drive to Pololū Valley viewpoint." } },
+                { id: 2, icon: "💃", zh: { name: "卢奥晚宴", time: "晚上", desc: "在度假村预订 Legends of Hawai‘i 卢奥大餐。欣赏火刀舞、草裙舞并聆听海岛故事。" }, en: { name: "Luau Night", time: "Night", desc: "Legends of Hawai‘i Luau. Fire-knife dancing, hula, and island stories." } }
+            ]},
+            5: { zh: { title: "大海邀约：深蓝挑战 🐋", date: "Day 5", timeline: "深蓝挑战", expert: "💡 专家建议：2月是观鲸巅峰期。亚特兰蒂斯潜水艇要求身高 36 英寸以上。魔鬼鱼夜潜建议长辈在船上观察。" }, en: { title: "Deep Sea 🐋", date: "Day 5", timeline: "Ocean", expert: "💡 EXPERT: February is peak whale season. Atlantis Submarine min height 36\". Watch mantas from boat!" }, color: "#1cb0f6", coords: [19.64, -156.02], pois: [
+                { icon: "🐋", zh: "观鲸码头", en: "Whale Watching", coords: [19.638, -155.996] },
+                { icon: "🐠", zh: "Captain Cook 浮潜", en: "Captain Cook Snorkel", coords: [19.481, -155.933] },
+                { icon: "✨", zh: "魔鬼鱼潜点", en: "Manta Ray Site", coords: [19.605, -155.996] },
+                { icon: "🔭", zh: "Mauna Kea 中心", en: "Mauna Kea VC", coords: [19.759, -155.456] }
+            ], events: [
+                { id: 0, icon: "🐋", zh: { name: "观鲸与潜水艇", time: "上午", desc: "乘坐观鲸船（2月巅峰）。或乘坐亚特兰蒂斯潜水艇下潜 100 英尺看珊瑚礁与沉船。" }, en: { name: "Whales & Sub", time: "AM", desc: "Peak whale season cruise. Or Atlantis Submarine dive 100ft below." } },
+                { id: 1, icon: "🐠", zh: { name: "库克船长浮潜", time: "下午", desc: "前往 Kealakekua Bay。在纪念碑附近浮潜，看五彩斑斓的珊瑚鱼类。或访问热带植物园。" }, en: { name: "Captain Cook", time: "PM", desc: "Snorkel Kealakekua Bay. Or explore Hawaii Tropical Bioreserve & Garden." } },
+                { id: 2, icon: "✨", zh: { name: "魔鬼鱼夜潜/观星", time: "晚上", desc: "科纳招牌魔鬼鱼夜潜。或者前往 Mauna Kea 访问中心，在 9,200 英尺高度体验专业观星。" }, en: { name: "Manta/Stargazing", time: "Night", desc: "Iconic Manta Ray night snorkel. Or Mauna Kea Visitor Center stargazing." } }
+            ]},
+            6: { zh: { title: "收获与道别 ✈️", date: "Day 6", timeline: "收获告别", expert: "💡 专家建议：还车前去买科纳咖啡和白色蜂蜜。机场建议提前 2.5 小时抵达。" }, en: { title: "Farewell ✈️", date: "Day 6", timeline: "Departure", expert: "💡 EXPERT: Last-minute Kona coffee/honey shopping. Arrive at KOA 2.5h early." }, color: "#afafaf", coords: [19.74, -156.04], pois: [
+                { icon: "☕", zh: "科纳咖啡产区", en: "Kona Coffee District", coords: [19.55, -155.92] },
+                { icon: "🏟️", zh: "老机场公园", en: "Old Airport Park", coords: [19.645, -156.01] }
+            ], events: [
+                { id: 0, icon: "🌊", zh: { name: "最后的漫步", time: "上午", desc: "在 Anaehoʻomalu Bay 进行最后一次游泳。逛逛农贸市场采购科纳咖啡和手工艺品。" }, en: { name: "Final Swim", time: "AM", desc: "Last swim at Anaehoʻomalu Bay. Visit farmers market for coffee and crafts." } },
+                { id: 1, icon: "🛫", zh: { name: "前往机场", time: "11:00 AM", desc: "前往 KOA 机场还车。欣赏最后的海景，乘坐 1:58 PM 航班告别大岛。" }, en: { name: "To Airport", time: "11:00 AM", desc: "Head to airport, return car. 1:58 PM flight departure." } }
+            ]}
+        };
 
-        init();
+        const translations = {
+            zh: { 
+                navTitle: "夏威夷大岛大冒险", 
+                navDesc: "从看火山口岩浆到绝美沙滩 and 深邃海底！", 
+                timelineTitle: "冒险路径", 
+                langToggle: "中 / EN", 
+                coreQuest: "⭐ 核心任务", 
+                expertInsight: "💡 专家建议", 
+                comments: "📝 我的备注", 
+                resetView: "重置视图",
+                hidePois: "隐藏景点",
+                showPois: "显示景点"
+            },
+            en: { 
+                navTitle: "HAWAII ADVENTURE", 
+                navDesc: "From volcanic lava to stunning beaches and deep oceans!", 
+                timelineTitle: "PATH", 
+                langToggle: "EN / 中", 
+                coreQuest: "⭐ CORE QUESTS", 
+                expertInsight: "💡 EXPERT INSIGHTS", 
+                comments: "📝 MY NOTES", 
+                resetView: "Reset View",
+                hidePois: "Hide POIs",
+                showPois: "Show POIs"
+            }
+        };
 
-        function init() {
-            checkProtocol();
+        function initMap() {
+            leafletMap = L.map('map', { zoomControl: false, minZoom: 7 }).setView(INITIAL_MAP_CENTER, INITIAL_MAP_ZOOM);
+            L.control.zoom({ position: 'bottomright' }).addTo(leafletMap);
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(leafletMap);
 
-            // 1. Three.js 场景设置
-            scene = new THREE.Scene();
-            scene.fog = new THREE.FogExp2(0x000000, 0.03);
+            const airportIcon = L.divIcon({ className: 'plane-marker', html: '✈️', iconSize: [44, 44], iconAnchor: [22, 22] });
+            const airportCoords = [19.738, -156.046];
+            L.marker(airportCoords, { icon: airportIcon }).addTo(leafletMap).bindTooltip("Kona (KOA)");
 
-            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 100);
-            camera.position.z = 8;
-
-            renderer = new THREE.WebGLRenderer({ antialias: false }); // Post-processing 开启时通常关闭原生抗锯齿以提升性能
-            renderer.setSize(window.innerWidth, window.innerHeight);
-            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-            renderer.toneMapping = THREE.ReinhardToneMapping;
-            document.body.appendChild(renderer.domElement);
-
-            // 2. 后期处理 (Bloom Effect)
-            const renderScene = new RenderPass(scene, camera);
+            renderMapMarkers();
             
-            // 参数: resolution, strength, radius, threshold
-            const bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 1.5, 0.4, 0.85);
-            bloomPass.strength = 2.0; // 辉光强度
-            bloomPass.radius = 0.5;   // 扩散半径
-            bloomPass.threshold = 0.1; // 亮度阈值
+            const routePoints = [
+                airportCoords, 
+                itinerary[1].coords, 
+                itinerary[2].coords, 
+                itinerary[3].coords, 
+                itinerary[4].coords, 
+                itinerary[5].coords, 
+                itinerary[6].coords, 
+                airportCoords
+            ];
 
-            composer = new EffectComposer(renderer);
-            composer.addPass(renderScene);
-            composer.addPass(bloomPass);
+            L.polyline(routePoints, { color: '#1cb0f6', weight: 8, opacity: 0.15 }).addTo(leafletMap);
+            L.polyline(routePoints, { color: '#1cb0f6', weight: 4, opacity: 0.8, className: 'route-path-flow' }).addTo(leafletMap);
 
-            // 3. Cannon.js 物理世界设置
-            world = new CANNON.World();
-            world.gravity.set(0, 0, 0); // 初始无重力
-            world.broadphase = new CANNON.NaiveBroadphase();
-            world.solver.iterations = 10;
-
-            // 材质
-            const physicsMaterial = new CANNON.Material('physics');
-            const physicsContactMaterial = new CANNON.ContactMaterial(physicsMaterial, physicsMaterial, {
-                friction: 0.1,
-                restitution: 0.7 // 弹性：0.7 表示像橡胶球
-            });
-            world.addContactMaterial(physicsContactMaterial);
-
-            // 创建物理球体
-            const sphereShape = new CANNON.Sphere(0.8);
-            sphereBody = new CANNON.Body({
-                mass: 1, // 质量为1，使其受力移动
-                shape: sphereShape,
-                material: physicsMaterial,
-                damping: 0.1
-            });
-            world.addBody(sphereBody);
-
-            // 创建隐形墙壁 (盒子) 防止球飞出去
-            createBoundaries(physicsMaterial);
-
-            // 4. 创建视觉物体
-            createVisuals();
-
-            // 5. 事件监听
-            window.addEventListener('resize', onWindowResize);
-            
-            // 按钮事件
-            const btn = document.getElementById('start-btn');
-            btn.addEventListener('click', startExperience);
-        }
-
-        // 检查 HTTPS
-        function checkProtocol() {
-            const isLocal = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
-            const isHttps = location.protocol === 'https:';
-            if (!isHttps && !isLocal) {
-                alert("⚠️ iOS 重要提示：\n为了使用麦克风和陀螺仪，必须使用 HTTPS 协议访问。\n如果使用本地IP调试，请确保开启了HTTPS代理或使用 localhost。");
+            for (let i = 0; i < routePoints.length - 1; i++) {
+                const p1 = routePoints[i];
+                const p2 = routePoints[i+1];
+                const mid = [ (p1[0] + p2[0]) / 2, (p1[1] + p2[1]) / 2 ];
+                const angle = Math.atan2(p2[1] - p1[1], p2[0] - p1[0]) * 180 / Math.PI;
+                L.marker(mid, {
+                    icon: L.divIcon({
+                        className: 'arrow-icon',
+                        html: `<div style="transform: rotate(${-angle}deg)">➤</div>`,
+                        iconSize: [20, 20],
+                        iconAnchor: [10, 10]
+                    })
+                }).addTo(leafletMap);
             }
         }
 
-        function createBoundaries(material) {
-            // 上下左右前后 6个面
-            const thickness = 1;
-            const boxGeo = new CANNON.Box(new CANNON.Vec3(boundarySize, thickness, boundarySize));
-            
-            // 地板 (其实是屏幕背面)
-            const floorBody = new CANNON.Body({ mass: 0, material: material });
-            floorBody.addShape(new CANNON.Plane());
-            floorBody.position.set(0, 0, -2);
-            world.addBody(floorBody);
-
-            // 顶棚 (屏幕这一侧)
-            const ceilBody = new CANNON.Body({ mass: 0, material: material });
-            ceilBody.addShape(new CANNON.Plane());
-            ceilBody.quaternion.setFromEuler(Math.PI, 0, 0);
-            ceilBody.position.set(0, 0, 2);
-            world.addBody(ceilBody);
-        }
-
-        function createVisuals() {
-            // A. 外层笼子 (Icosahedron)
-            const geo1 = new THREE.IcosahedronGeometry(1.2, 1);
-            const mat1 = new THREE.MeshBasicMaterial({ 
-                color: 0x00ffff, 
-                wireframe: true,
-                transparent: true,
-                opacity: 0.5 
-            });
-            coreMesh = new THREE.Mesh(geo1, mat1);
-            scene.add(coreMesh);
-
-            // B. 内部发光核心 (受物理引擎控制)
-            const geo2 = new THREE.SphereGeometry(0.8, 32, 32);
-            const mat2 = new THREE.MeshBasicMaterial({ color: 0xff00ff }); // 紫色
-            innerCoreMesh = new THREE.Mesh(geo2, mat2);
-            scene.add(innerCoreMesh);
-
-            // C. 粒子场
-            const particlesCount = 1500;
-            const posArray = new Float32Array(particlesCount * 3);
-            for(let i = 0; i < particlesCount * 3; i++) {
-                posArray[i] = (Math.random() - 0.5) * 25;
+        function resetMapView() {
+            if (leafletMap) {
+                leafletMap.flyTo(INITIAL_MAP_CENTER, INITIAL_MAP_ZOOM, { duration: 1.5 });
             }
-            const particlesGeo = new THREE.BufferGeometry();
-            particlesGeo.setAttribute('position', new THREE.BufferAttribute(posArray, 3));
-            const particlesMat = new THREE.PointsMaterial({
-                size: 0.08,
-                color: 0x4444ff, // 偏蓝
-                transparent: true,
-                opacity: 0.8,
-                blending: THREE.AdditiveBlending
-            });
-            particles = new THREE.Points(particlesGeo, particlesMat);
-            scene.add(particles);
         }
 
-        // --- 启动逻辑 (包含 Audio 初始化) ---
-        async function startExperience() {
-            const btn = document.getElementById('start-btn');
-            btn.innerText = "启动中...";
-            
-            try {
-                // 1. 初始化 Audio Context (必须链式调用)
-                await Tone.start();
-                initAudio();
-                
-                // 尝试初始化麦克风
-                initMic(); 
+        function togglePoiVisibility() {
+            poisVisible = !poisVisible;
+            renderMapMarkers();
+            updatePoiButtonText();
+        }
 
-                // 2. 初始化传感器 (陀螺仪 + 距离传感器)
-                if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
-                    // iOS 13+ 需要权限
-                    DeviceOrientationEvent.requestPermission()
-                        .then(permissionState => {
-                            if (permissionState === 'granted') {
-                                window.addEventListener('deviceorientation', handleOrientation);
-                            } else {
-                                alert('权限被拒绝：无法获取陀螺仪数据。');
-                            }
-                        })
-                        .catch(err => {
-                            console.error(err);
-                            alert('无法请求传感器权限，请确认使用的是 HTTPS。');
-                        });
-                } else {
-                    // 非 iOS 13+ 或 Android
-                    window.addEventListener('deviceorientation', handleOrientation);
-                }
+        function updatePoiButtonText() {
+            const t = translations[currentLang];
+            const btnText = document.getElementById('poi-toggle-text');
+            if (btnText) btnText.innerText = poisVisible ? t.hidePois : t.showPois;
+        }
 
-                // 距离传感器监听 (iOS 不支持，Android 支持)
-                if ('onuserproximity' in window) {
-                    window.addEventListener('userproximity', (event) => isHovering = event.near);
-                } else if ('ondeviceproximity' in window) {
-                    window.addEventListener('deviceproximity', (event) => isHovering = event.value < 5);
-                }
+        function renderTimeline() {
+            const container = document.getElementById('path-grid');
+            container.innerHTML = '';
+            const displayOrder = [1, 2, 4, 3, 5, 6];
+            displayOrder.forEach((dayNum) => {
+                const d = itinerary[dayNum];
+                const dayData = d[currentLang];
+                const node = document.createElement('div');
+                node.id = `node-${dayNum}`;
+                node.className = 'text-center group cursor-pointer relative z-10 flex flex-col items-center';
+                node.onclick = () => showDay(parseInt(dayNum));
+                node.innerHTML = `
+                    <div class="timeline-day-text" style="color: ${d.color};">${dayData.date}</div>
+                    <div class="step-circle text-white text-2xl shadow-md" id="circle-${dayNum}" style="background-color: ${d.color}">
+                        ${['🌋','👣','🌿','🐎','🐋','✈️'][dayNum-1]}
+                    </div>
+                    <div class="timeline-title-text text-gray-700 transition-opacity group-hover:opacity-70">${dayData.timeline}</div>
+                `;
+                container.appendChild(node);
+            });
 
-                // --- iOS 替代方案：触摸屏幕模拟“悬浮” ---
-                window.addEventListener('touchstart', (e) => { 
-                    // 防止多点触控导致的问题
-                    if(e.touches.length > 0) isHovering = true; 
+            const linesHtml = `
+                <div class="snake-line line-h" style="left: 25%; top: 72px; width: 50%;"></div>
+                <div class="snake-line line-v" style="right: 25%; top: 72px; height: 154px;"></div>
+                <div class="snake-line line-h" style="left: 25%; top: 222px; width: 50%;"></div>
+                <div class="snake-line line-v" style="left: 25%; top: 222px; height: 154px;"></div>
+                <div class="snake-line line-h" style="left: 25%; top: 372px; width: 50%;"></div>
+            `;
+            container.insertAdjacentHTML('beforeend', linesHtml);
+        }
+
+        function getDisplayEvents(dayNum) {
+            const baseEvents = itinerary[dayNum].events;
+            const saved = userEdits[dayNum];
+            if (saved && saved.eventOrder) {
+                return saved.eventOrder.map(oi => {
+                    const b = baseEvents.find(be => be.id === oi.id);
+                    return { ...b, customDesc: oi.customDesc };
                 });
-                window.addEventListener('touchend', () => { isHovering = false; });
-                window.addEventListener('mousedown', () => { isHovering = true; }); // PC 鼠标测试
-                window.addEventListener('mouseup', () => { isHovering = false; });
-
-
-                // PC 调试模式 (鼠标模拟陀螺仪)
-                if (!/Mobi|Android|iPhone/i.test(navigator.userAgent)) {
-                    window.addEventListener('mousemove', handleMouseSimulate);
-                    window.addEventListener('keydown', (e) => { if(e.code === 'Space') isHovering = true; });
-                    window.addEventListener('keyup', (e) => { if(e.code === 'Space') isHovering = false; });
-                }
-
-                // 隐藏 UI，开始循环
-                document.getElementById('ui-layer').style.display = 'none';
-                isRunning = true;
-                animate();
-
-                // 启动时的微震动反馈 (Android Only)
-                triggerHaptic(50);
-
-            } catch (e) {
-                alert("启动失败: " + e.message);
-                btn.innerText = "重试";
             }
+            return baseEvents;
         }
 
-        function initAudio() {
-            // 背景低音 Drone
-            synth = new Tone.FMSynth({
-                harmonicity: 3,
-                modulationIndex: 10,
-                detune: 0,
-                oscillator: { type: "sine" },
-                envelope: { attack: 0.1, decay: 0.01, sustain: 1, release: 0.5 },
-                modulation: { type: "square" },
-                modulationEnvelope: { attack: 0.5, decay: 0, sustain: 1, release: 0.5 }
-            }).toDestination();
+        function showDay(dayNum) {
+            const data = itinerary[dayNum];
+            const langData = data[currentLang];
+            const modal = document.getElementById('dayModal');
+            const contentArea = document.getElementById('modalContent');
+            const t = translations[currentLang];
+
+            document.querySelectorAll('.step-circle').forEach(c => c.classList.remove('active'));
+            const circle = document.getElementById(`circle-${dayNum}`);
+            if(circle) circle.classList.add('active');
+
+            const savedDay = userEdits[dayNum] || {};
+            const eventsToRender = getDisplayEvents(dayNum);
+
+            let html = `<div class="section-title">${t.coreQuest}</div><div id="sortable-events" class="space-y-8">`;
+            eventsToRender.forEach((e) => {
+                const displayDesc = e.customDesc || e[currentLang].desc;
+                html += `
+                <div class="flex gap-6 items-start p-2 rounded-xl transition-colors ${editMode ? 'hover:bg-gray-100 cursor-move border-2 border-dashed border-gray-300' : ''}" data-id="${e.id}">
+                    <div class="drag-handle self-center p-1 text-gray-400 font-bold text-2xl">⣿</div>
+                    <div class="w-16 h-16 bg-white duo-card rounded-2xl flex items-center justify-center shrink-0 text-4xl shadow-sm">${e.icon}</div>
+                    <div class="pt-1 flex-1">
+                        <div class="flex items-center gap-2 mb-1">
+                            <span class="bg-gray-100 text-gray-500 font-black text-[11px] px-2 py-0.5 rounded-md uppercase tracking-wide">${e[currentLang].time || 'Mission'}</span>
+                        </div>
+                        <h4 class="font-black text-2xl text-gray-800 leading-tight mb-2">${e[currentLang].name}</h4>
+                        <p class="editable-field text-gray-600 text-sm md:text-lg leading-relaxed mt-1 font-bold" contenteditable="${editMode}" onblur="saveEventData(${dayNum})">${displayDesc}</p>
+                    </div>
+                </div>`;
+            });
+            html += `</div>`;
             
-            const reverb = new Tone.Reverb(2).toDestination();
-            synth.connect(reverb);
-            synth.triggerAttack("C2"); 
+            html += `<div class="section-title mt-10">${t.expertInsight}</div><div class="bg-orange-50 p-6 rounded-3xl border-2 border-orange-100 font-bold text-orange-800 text-lg italic">${langData.expert}</div>`;
+            html += `<div class="comment-box">
+                <h5 class="font-black text-[11px] text-gray-400 uppercase tracking-widest mb-2">${t.comments}</h5>
+                <textarea class="w-full bg-transparent border-none focus:ring-0 text-gray-700 font-black italic text-lg" onblur="saveComment(${dayNum}, this.value)">${savedDay.comments || ""}</textarea>
+            </div>`;
 
-            // 碰撞音效
-            metalSynth = new Tone.MembraneSynth({
-                pitchDecay: 0.05,
-                octaves: 4,
-                oscillator: { type: "sine" },
-                envelope: { attack: 0.001, decay: 0.4, sustain: 0.01, release: 1.4 }
-            }).toDestination();
-            metalSynth.connect(reverb);
-        }
+            // Prepare the view updates
+            document.getElementById('modalHeader').style.backgroundColor = data.color;
+            document.getElementById('modalTitle').innerText = langData.title;
+            document.getElementById('modalDate').innerText = langData.date;
+            
+            // Set content and explicitly scroll to top
+            contentArea.innerHTML = html;
+            
+            // Show modal first
+            modal.style.display = 'flex';
+            
+            // Critical fix: Ensure scroll reset happens after the display is set and layout is processed
+            contentArea.scrollTop = 0;
+            requestAnimationFrame(() => {
+                contentArea.scrollTop = 0;
+            });
 
-        async function initMic() {
-            try {
-                mic = new Tone.UserMedia();
-                await mic.open();
-                console.log("麦克风已连接");
-                meter = new Tone.Meter();
-                mic.connect(meter);
-            } catch (e) {
-                console.warn("麦克风访问失败 (可能是权限或非HTTPS):", e);
-                // 不弹窗报错，以免打断体验，只是麦克风功能不可用
+            if(leafletMap) leafletMap.flyTo(data.coords, 14, { duration: 1.5 });
+            
+            if (editMode) {
+                Sortable.create(document.getElementById('sortable-events'), { 
+                    handle: '.drag-handle', 
+                    animation: 150, 
+                    ghostClass: 'sortable-ghost', 
+                    onEnd: () => saveEventData(dayNum) 
+                });
             }
         }
 
-        // --- 交互处理 ---
-        function handleOrientation(event) {
-            // 我们只更新变量，不在事件回调中直接设置物理重力，
-            // 这样可以在 animate 循环中处理"悬浮"的重力覆盖逻辑
-            const x = event.gamma || 0; // 左右
-            const y = event.beta || 0;  // 前后
-            deviceGamma = x;
-            deviceBeta = y;
+        function saveEventData(dayNum) {
+            const eventElems = document.querySelectorAll('#sortable-events > div');
+            const newOrder = [];
+            eventElems.forEach(el => {
+                const id = parseInt(el.getAttribute('data-id'));
+                const desc = el.querySelector('.editable-field').innerText;
+                newOrder.push({ id, customDesc: desc });
+            });
+            if (!userEdits[dayNum]) userEdits[dayNum] = {};
+            userEdits[dayNum].eventOrder = newOrder;
+            persist();
         }
 
-        function handleMouseSimulate(event) {
-            const x = (event.clientX / window.innerWidth) * 2 - 1;
-            const y = (event.clientY / window.innerHeight) * 2 - 1;
-            // 模拟数据放大
-            deviceGamma = x * 45;
-            deviceBeta = y * 45;
+        function saveComment(dayNum, text) {
+            if (!userEdits[dayNum]) userEdits[dayNum] = {};
+            userEdits[dayNum].comments = text;
+            persist();
         }
 
-        // --- 震动反馈函数 ---
-        function triggerHaptic(duration = 10) {
-            // navigator.vibrate 支持 Android (Chrome/Firefox)
-            // iOS Safari 目前不支持 Web Haptics API
-            if (navigator.vibrate) {
-                navigator.vibrate(duration);
+        function persist() {
+            localStorage.setItem('hawaii_adventure_v1', JSON.stringify(userEdits));
+            const indicator = document.getElementById('save-indicator');
+            indicator.classList.remove('hidden');
+            setTimeout(() => indicator.classList.add('hidden'), 1500);
+        }
+
+        function toggleEditMode() {
+            editMode = !editMode;
+            document.getElementById('edit-toggle').classList.toggle('active');
+            const modal = document.getElementById('dayModal');
+            if (modal.style.display === 'flex') {
+                const active = document.querySelector('.step-circle.active');
+                if (active) showDay(parseInt(active.id.split('-')[1]));
             }
         }
 
-        // --- 核心循环 ---
-        function animate() {
-            requestAnimationFrame(animate);
+        function toggleLanguage() {
+            currentLang = currentLang === 'zh' ? 'en' : 'zh';
+            renderTimeline();
+            const t = translations[currentLang];
+            document.getElementById('nav-title').innerText = t.navTitle;
+            document.getElementById('nav-desc').innerText = t.navDesc;
+            document.getElementById('timeline-title').innerText = t.timelineTitle;
+            const editBtn = document.getElementById('edit-toggle');
+            if (editBtn) editBtn.querySelector('span').innerText = (currentLang === 'zh' ? '编辑' : 'EDIT');
+            const resetBtn = document.getElementById('reset-view-text');
+            if (resetBtn) resetBtn.innerText = t.resetView;
+            updatePoiButtonText();
+            renderMapMarkers();
+        }
 
-            if (!isRunning) return;
+        function closeModal(e) {
+            if (!e || e.target === document.getElementById('dayModal')) {
+                document.getElementById('dayModal').style.display = 'none';
+            }
+        }
 
-            // 0. 重力逻辑控制 (核心)
-            if (isHovering) {
-                // 状态切换时触发一次中等震动，模拟力场开启
-                if (!wasHovering) {
-                    triggerHaptic(40);
-                }
+        function renderMapMarkers() {
+            if(!leafletMap) return;
+            activeMarkers.forEach(m => leafletMap.removeLayer(m));
+            activeLabels.forEach(l => leafletMap.removeLayer(l));
+            activePois.forEach(p => leafletMap.removeLayer(p));
+            activeMarkers = []; 
+            activeLabels = [];
+            activePois = [];
 
-                // 悬浮模式 (距离传感器 OR 触摸/长按)
-                // 忽略手机倾斜，重力反转向上
-                world.gravity.set(0, 8, 0); 
+            Object.keys(itinerary).forEach(dayNum => {
+                const d = itinerary[dayNum];
                 
-                // 视觉反馈：变为金色
-                innerCoreMesh.material.color.setHex(0xffd700);
-                
-                // 粒子特效：向上飞升
-                particles.position.y += 0.02;
-                if(particles.position.y > 2) particles.position.y = 0;
+                const marker = L.circleMarker(d.coords, { color: d.color, fillColor: d.color, fillOpacity: 1, weight: 6, radius: 16 }).addTo(leafletMap).on('click', () => showDay(dayNum));
+                const label = L.marker(d.coords, { 
+                    icon: L.divIcon({ 
+                        className: 'custom-div-icon', 
+                        html: `<div class="day-label" style="color:${d.color}">${currentLang === 'zh' ? '第' : 'Day'} ${dayNum} ${currentLang === 'zh' ? '天' : ''}</div>`,
+                        iconAnchor: d.labelOffset || [45, 25] 
+                    })
+                }).addTo(leafletMap).on('click', () => showDay(dayNum));
+                activeMarkers.push(marker); activeLabels.push(label);
 
-            } else {
-                // 状态切换时触发一次轻微震动，模拟力场消失
-                if (wasHovering) {
-                    triggerHaptic(15);
+                if (poisVisible && d.pois) {
+                    d.pois.forEach(poi => {
+                        const poiMarker = L.marker(poi.coords, {
+                            icon: L.divIcon({
+                                className: 'poi-marker',
+                                html: `<span>${poi.icon}</span>`,
+                                iconSize: [32, 32],
+                                iconAnchor: [16, 16]
+                            })
+                        }).addTo(leafletMap).bindTooltip(currentLang === 'zh' ? poi.zh : poi.en);
+                        activePois.push(poiMarker);
+                    });
                 }
-
-                // 普通模式：重力跟随手机倾斜
-                world.gravity.set(deviceGamma * 0.5, -deviceBeta * 0.5, 0);
-                
-                // 粒子恢复原位逻辑(简化)
-                particles.position.y *= 0.95;
-            }
-            
-            // 更新上一帧状态
-            wasHovering = isHovering;
-
-
-            // 1. 麦克风吹气检测 logic
-            if (meter && !isHovering) { // 悬浮时优先响应悬浮
-                const level = meter.getValue(); 
-                if (level > -15) {
-                    // 吹气时的随机震动，模拟风的湍流
-                    // 为了避免震动过于密集导致麻木，稍微加个概率
-                    if (Math.random() > 0.8) {
-                        triggerHaptic(5); // 极短的震动
-                    }
-
-                    const windStrength = 30;
-                    sphereBody.applyForce(new CANNON.Vec3(
-                        (Math.random() - 0.5) * windStrength,
-                        (Math.random() - 0.5) * windStrength + 10,
-                        (Math.random() - 0.5) * windStrength
-                    ), sphereBody.position);
-
-                    innerCoreMesh.material.color.setHex(0xffffff);
-                    particles.rotation.z += 0.2;
-                } else {
-                     // 恢复紫色 (如果没在悬浮)
-                     if (innerCoreMesh.material.color.getHex() !== 0xff00ff && !isHovering) {
-                         // 简单的颜色平滑过渡模拟
-                         if (Math.random() > 0.9) innerCoreMesh.material.color.setHex(0xff00ff);
-                     }
-                }
-            }
-
-            // 2. 更新物理世界
-            world.step(1 / 60);
-
-            // 手动边界限制
-            const limitX = 3.5;
-            const limitY = 6.0;
-            const vel = sphereBody.velocity;
-            
-            if (sphereBody.position.x > limitX) {
-                sphereBody.position.x = limitX;
-                if(vel.x > 0) { vel.x *= -0.8; triggerBounce(Math.abs(vel.x)); }
-            } else if (sphereBody.position.x < -limitX) {
-                sphereBody.position.x = -limitX;
-                if(vel.x < 0) { vel.x *= -0.8; triggerBounce(Math.abs(vel.x)); }
-            }
-
-            if (sphereBody.position.y > limitY) {
-                sphereBody.position.y = limitY;
-                if(vel.y > 0) { vel.y *= -0.8; triggerBounce(Math.abs(vel.y)); }
-            } else if (sphereBody.position.y < -limitY) {
-                sphereBody.position.y = -limitY;
-                if(vel.y < 0) { vel.y *= -0.8; triggerBounce(Math.abs(vel.y)); }
-            }
-
-            sphereBody.position.z = 0;
-            sphereBody.velocity.z = 0;
-
-            // 3. 同步视觉物体
-            innerCoreMesh.position.copy(sphereBody.position);
-            coreMesh.position.lerp(sphereBody.position, 0.1);
-            
-            coreMesh.rotation.x += 0.02;
-            coreMesh.rotation.y += 0.02;
-            if(!isHovering) particles.rotation.y = deviceGamma * 0.01;
-
-            // 4. Audio 反馈
-            updateAudio();
-
-            // 5. 渲染
-            composer.render();
-            
-            // 调试信息
-            const micLevel = meter ? Math.round(meter.getValue()) : 'N/A';
-            const hoverState = isHovering ? "ON" : "OFF";
-            document.getElementById('debug').innerText = 
-                `G: ${Math.round(deviceGamma)},${Math.round(deviceBeta)} | Mic: ${micLevel} | Hover: ${hoverState}`;
+            });
         }
 
-        function triggerBounce(velocity) {
-            if (velocity > 2) {
-                const note = velocity > 10 ? "C4" : (velocity > 5 ? "G3" : "C3");
-                metalSynth.triggerAttackRelease(note, "8n");
-                
-                // 碰撞触觉反馈
-                // 速度越快，震动时间稍微越长 (但保持短促以获得"敲击"感)
-                // 限制最大震动时长，避免拖泥带水
-                const hapticDuration = Math.min(Math.floor(velocity * 2), 20);
-                triggerHaptic(hapticDuration);
-
-                if ((!meter || meter.getValue() <= -15) && !isHovering) {
-                    innerCoreMesh.material.color.setHex(0xffffff);
-                    setTimeout(() => { if(!isHovering) innerCoreMesh.material.color.setHex(0xff00ff) }, 100);
-                }
-            }
-        }
-
-        function updateAudio() {
-            if (!synth) return;
-            const speed = sphereBody.velocity.length();
-            const modulation = Math.min(Math.max(speed * 2, 5), 50);
-            synth.modulationIndex.rampTo(modulation, 0.1);
-            const detuneVal = sphereBody.position.y * 100;
-            synth.detune.rampTo(detuneVal, 0.1);
-        }
-
-        function onWindowResize() {
-            camera.aspect = window.innerWidth / window.innerHeight;
-            camera.updateProjectionMatrix();
-            renderer.setSize(window.innerWidth, window.innerHeight);
-            composer.setSize(window.innerWidth, window.innerHeight);
+        window.onload = () => { 
+            initMap(); 
+            renderTimeline(); 
         }
     </script>
 </body>
