@@ -1,0 +1,535 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>霓虹重力核心 PRO</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #050505; font-family: 'Courier New', Courier, monospace; }
+        canvas { display: block; }
+        #ui-layer {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            color: #0ff;
+            z-index: 10;
+            pointer-events: none;
+            width: 100%;
+        }
+        h1 {
+            font-size: 24px;
+            text-shadow: 0 0 10px #0ff;
+            margin-bottom: 30px;
+            letter-spacing: 4px;
+        }
+        #start-btn {
+            pointer-events: auto;
+            background: rgba(0, 0, 0, 0.6);
+            border: 2px solid #0ff;
+            color: #0ff;
+            padding: 15px 40px;
+            font-size: 16px;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            cursor: pointer;
+            transition: all 0.3s;
+            box-shadow: 0 0 15px #0ff, inset 0 0 10px rgba(0, 255, 255, 0.2);
+            border-radius: 4px;
+        }
+        #start-btn:active { background: #0ff; color: #000; box-shadow: 0 0 30px #0ff; }
+        #debug {
+            position: absolute;
+            bottom: 15px;
+            left: 15px;
+            color: rgba(0, 255, 255, 0.7);
+            font-size: 10px;
+            pointer-events: none;
+            text-shadow: 0 0 5px #0ff;
+            width: 100%;
+            text-align: center;
+        }
+        #instructions {
+            margin-top: 15px;
+            font-size: 12px;
+            opacity: 0.7;
+            line-height: 1.6;
+            padding: 0 20px;
+        }
+    </style>
+    <!-- 使用 Import Map 管理 ES Module 依赖 -->
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
+                "cannon-es": "https://unpkg.com/cannon-es@0.20.0/dist/cannon-es.js"
+            }
+        }
+    </script>
+    <!-- 修复：通过全局 Script 标签加载 Tone.js 以避免 ESM 导入错误 -->
+    <script src="https://unpkg.com/tone@14.7.77/build/Tone.js"></script>
+</head>
+<body>
+
+    <div id="ui-layer">
+        <h1>NEON GRAVITY CORE</h1>
+        <button id="start-btn">初始化系统</button>
+        <div id="instructions">
+            佩戴耳机体验最佳<br>
+            倾斜设备控制核心 | 吹气产生风暴<br>
+            <span style="color: #ffd700;">iOS用户: 长按屏幕或遮挡听筒悬浮</span>
+        </div>
+    </div>
+    <div id="debug">系统待机...</div>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+        import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+        import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+        import * as CANNON from 'cannon-es';
+        
+        // 注意：Tone.js 现在作为全局对象 'Tone' 直接使用，无需 import
+
+        // --- 变量定义 ---
+        let scene, camera, renderer, composer;
+        let world, sphereBody, wallMaterial;
+        let coreMesh, innerCoreMesh, particles;
+        let synth, noiseSynth, metalSynth;
+        let mic, meter; // 麦克风和电平表
+        let isRunning = false;
+        let isHovering = false; // 距离传感器/触摸状态
+        let wasHovering = false; // 记录上一帧的悬浮状态，用于触发状态改变时的震动
+        
+        // 物理世界参数
+        const boundarySize = 6; // 物理墙壁的范围
+
+        // 陀螺仪数据
+        let deviceBeta = 0, deviceGamma = 0;
+
+        init();
+
+        function init() {
+            checkProtocol();
+
+            // 1. Three.js 场景设置
+            scene = new THREE.Scene();
+            scene.fog = new THREE.FogExp2(0x000000, 0.03);
+
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 100);
+            camera.position.z = 8;
+
+            renderer = new THREE.WebGLRenderer({ antialias: false }); // Post-processing 开启时通常关闭原生抗锯齿以提升性能
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            renderer.toneMapping = THREE.ReinhardToneMapping;
+            document.body.appendChild(renderer.domElement);
+
+            // 2. 后期处理 (Bloom Effect)
+            const renderScene = new RenderPass(scene, camera);
+            
+            // 参数: resolution, strength, radius, threshold
+            const bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 1.5, 0.4, 0.85);
+            bloomPass.strength = 2.0; // 辉光强度
+            bloomPass.radius = 0.5;   // 扩散半径
+            bloomPass.threshold = 0.1; // 亮度阈值
+
+            composer = new EffectComposer(renderer);
+            composer.addPass(renderScene);
+            composer.addPass(bloomPass);
+
+            // 3. Cannon.js 物理世界设置
+            world = new CANNON.World();
+            world.gravity.set(0, 0, 0); // 初始无重力
+            world.broadphase = new CANNON.NaiveBroadphase();
+            world.solver.iterations = 10;
+
+            // 材质
+            const physicsMaterial = new CANNON.Material('physics');
+            const physicsContactMaterial = new CANNON.ContactMaterial(physicsMaterial, physicsMaterial, {
+                friction: 0.1,
+                restitution: 0.7 // 弹性：0.7 表示像橡胶球
+            });
+            world.addContactMaterial(physicsContactMaterial);
+
+            // 创建物理球体
+            const sphereShape = new CANNON.Sphere(0.8);
+            sphereBody = new CANNON.Body({
+                mass: 1, // 质量为1，使其受力移动
+                shape: sphereShape,
+                material: physicsMaterial,
+                damping: 0.1
+            });
+            world.addBody(sphereBody);
+
+            // 创建隐形墙壁 (盒子) 防止球飞出去
+            createBoundaries(physicsMaterial);
+
+            // 4. 创建视觉物体
+            createVisuals();
+
+            // 5. 事件监听
+            window.addEventListener('resize', onWindowResize);
+            
+            // 按钮事件
+            const btn = document.getElementById('start-btn');
+            btn.addEventListener('click', startExperience);
+        }
+
+        // 检查 HTTPS
+        function checkProtocol() {
+            const isLocal = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+            const isHttps = location.protocol === 'https:';
+            if (!isHttps && !isLocal) {
+                alert("⚠️ iOS 重要提示：\n为了使用麦克风和陀螺仪，必须使用 HTTPS 协议访问。\n如果使用本地IP调试，请确保开启了HTTPS代理或使用 localhost。");
+            }
+        }
+
+        function createBoundaries(material) {
+            // 上下左右前后 6个面
+            const thickness = 1;
+            const boxGeo = new CANNON.Box(new CANNON.Vec3(boundarySize, thickness, boundarySize));
+            
+            // 地板 (其实是屏幕背面)
+            const floorBody = new CANNON.Body({ mass: 0, material: material });
+            floorBody.addShape(new CANNON.Plane());
+            floorBody.position.set(0, 0, -2);
+            world.addBody(floorBody);
+
+            // 顶棚 (屏幕这一侧)
+            const ceilBody = new CANNON.Body({ mass: 0, material: material });
+            ceilBody.addShape(new CANNON.Plane());
+            ceilBody.quaternion.setFromEuler(Math.PI, 0, 0);
+            ceilBody.position.set(0, 0, 2);
+            world.addBody(ceilBody);
+        }
+
+        function createVisuals() {
+            // A. 外层笼子 (Icosahedron)
+            const geo1 = new THREE.IcosahedronGeometry(1.2, 1);
+            const mat1 = new THREE.MeshBasicMaterial({ 
+                color: 0x00ffff, 
+                wireframe: true,
+                transparent: true,
+                opacity: 0.5 
+            });
+            coreMesh = new THREE.Mesh(geo1, mat1);
+            scene.add(coreMesh);
+
+            // B. 内部发光核心 (受物理引擎控制)
+            const geo2 = new THREE.SphereGeometry(0.8, 32, 32);
+            const mat2 = new THREE.MeshBasicMaterial({ color: 0xff00ff }); // 紫色
+            innerCoreMesh = new THREE.Mesh(geo2, mat2);
+            scene.add(innerCoreMesh);
+
+            // C. 粒子场
+            const particlesCount = 1500;
+            const posArray = new Float32Array(particlesCount * 3);
+            for(let i = 0; i < particlesCount * 3; i++) {
+                posArray[i] = (Math.random() - 0.5) * 25;
+            }
+            const particlesGeo = new THREE.BufferGeometry();
+            particlesGeo.setAttribute('position', new THREE.BufferAttribute(posArray, 3));
+            const particlesMat = new THREE.PointsMaterial({
+                size: 0.08,
+                color: 0x4444ff, // 偏蓝
+                transparent: true,
+                opacity: 0.8,
+                blending: THREE.AdditiveBlending
+            });
+            particles = new THREE.Points(particlesGeo, particlesMat);
+            scene.add(particles);
+        }
+
+        // --- 启动逻辑 (包含 Audio 初始化) ---
+        async function startExperience() {
+            const btn = document.getElementById('start-btn');
+            btn.innerText = "启动中...";
+            
+            try {
+                // 1. 初始化 Audio Context (必须链式调用)
+                await Tone.start();
+                initAudio();
+                
+                // 尝试初始化麦克风
+                initMic(); 
+
+                // 2. 初始化传感器 (陀螺仪 + 距离传感器)
+                if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+                    // iOS 13+ 需要权限
+                    DeviceOrientationEvent.requestPermission()
+                        .then(permissionState => {
+                            if (permissionState === 'granted') {
+                                window.addEventListener('deviceorientation', handleOrientation);
+                            } else {
+                                alert('权限被拒绝：无法获取陀螺仪数据。');
+                            }
+                        })
+                        .catch(err => {
+                            console.error(err);
+                            alert('无法请求传感器权限，请确认使用的是 HTTPS。');
+                        });
+                } else {
+                    // 非 iOS 13+ 或 Android
+                    window.addEventListener('deviceorientation', handleOrientation);
+                }
+
+                // 距离传感器监听 (iOS 不支持，Android 支持)
+                if ('onuserproximity' in window) {
+                    window.addEventListener('userproximity', (event) => isHovering = event.near);
+                } else if ('ondeviceproximity' in window) {
+                    window.addEventListener('deviceproximity', (event) => isHovering = event.value < 5);
+                }
+
+                // --- iOS 替代方案：触摸屏幕模拟“悬浮” ---
+                window.addEventListener('touchstart', (e) => { 
+                    // 防止多点触控导致的问题
+                    if(e.touches.length > 0) isHovering = true; 
+                });
+                window.addEventListener('touchend', () => { isHovering = false; });
+                window.addEventListener('mousedown', () => { isHovering = true; }); // PC 鼠标测试
+                window.addEventListener('mouseup', () => { isHovering = false; });
+
+
+                // PC 调试模式 (鼠标模拟陀螺仪)
+                if (!/Mobi|Android|iPhone/i.test(navigator.userAgent)) {
+                    window.addEventListener('mousemove', handleMouseSimulate);
+                    window.addEventListener('keydown', (e) => { if(e.code === 'Space') isHovering = true; });
+                    window.addEventListener('keyup', (e) => { if(e.code === 'Space') isHovering = false; });
+                }
+
+                // 隐藏 UI，开始循环
+                document.getElementById('ui-layer').style.display = 'none';
+                isRunning = true;
+                animate();
+
+                // 启动时的微震动反馈 (Android Only)
+                triggerHaptic(50);
+
+            } catch (e) {
+                alert("启动失败: " + e.message);
+                btn.innerText = "重试";
+            }
+        }
+
+        function initAudio() {
+            // 背景低音 Drone
+            synth = new Tone.FMSynth({
+                harmonicity: 3,
+                modulationIndex: 10,
+                detune: 0,
+                oscillator: { type: "sine" },
+                envelope: { attack: 0.1, decay: 0.01, sustain: 1, release: 0.5 },
+                modulation: { type: "square" },
+                modulationEnvelope: { attack: 0.5, decay: 0, sustain: 1, release: 0.5 }
+            }).toDestination();
+            
+            const reverb = new Tone.Reverb(2).toDestination();
+            synth.connect(reverb);
+            synth.triggerAttack("C2"); 
+
+            // 碰撞音效
+            metalSynth = new Tone.MembraneSynth({
+                pitchDecay: 0.05,
+                octaves: 4,
+                oscillator: { type: "sine" },
+                envelope: { attack: 0.001, decay: 0.4, sustain: 0.01, release: 1.4 }
+            }).toDestination();
+            metalSynth.connect(reverb);
+        }
+
+        async function initMic() {
+            try {
+                mic = new Tone.UserMedia();
+                await mic.open();
+                console.log("麦克风已连接");
+                meter = new Tone.Meter();
+                mic.connect(meter);
+            } catch (e) {
+                console.warn("麦克风访问失败 (可能是权限或非HTTPS):", e);
+                // 不弹窗报错，以免打断体验，只是麦克风功能不可用
+            }
+        }
+
+        // --- 交互处理 ---
+        function handleOrientation(event) {
+            // 我们只更新变量，不在事件回调中直接设置物理重力，
+            // 这样可以在 animate 循环中处理"悬浮"的重力覆盖逻辑
+            const x = event.gamma || 0; // 左右
+            const y = event.beta || 0;  // 前后
+            deviceGamma = x;
+            deviceBeta = y;
+        }
+
+        function handleMouseSimulate(event) {
+            const x = (event.clientX / window.innerWidth) * 2 - 1;
+            const y = (event.clientY / window.innerHeight) * 2 - 1;
+            // 模拟数据放大
+            deviceGamma = x * 45;
+            deviceBeta = y * 45;
+        }
+
+        // --- 震动反馈函数 ---
+        function triggerHaptic(duration = 10) {
+            // navigator.vibrate 支持 Android (Chrome/Firefox)
+            // iOS Safari 目前不支持 Web Haptics API
+            if (navigator.vibrate) {
+                navigator.vibrate(duration);
+            }
+        }
+
+        // --- 核心循环 ---
+        function animate() {
+            requestAnimationFrame(animate);
+
+            if (!isRunning) return;
+
+            // 0. 重力逻辑控制 (核心)
+            if (isHovering) {
+                // 状态切换时触发一次中等震动，模拟力场开启
+                if (!wasHovering) {
+                    triggerHaptic(40);
+                }
+
+                // 悬浮模式 (距离传感器 OR 触摸/长按)
+                // 忽略手机倾斜，重力反转向上
+                world.gravity.set(0, 8, 0); 
+                
+                // 视觉反馈：变为金色
+                innerCoreMesh.material.color.setHex(0xffd700);
+                
+                // 粒子特效：向上飞升
+                particles.position.y += 0.02;
+                if(particles.position.y > 2) particles.position.y = 0;
+
+            } else {
+                // 状态切换时触发一次轻微震动，模拟力场消失
+                if (wasHovering) {
+                    triggerHaptic(15);
+                }
+
+                // 普通模式：重力跟随手机倾斜
+                world.gravity.set(deviceGamma * 0.5, -deviceBeta * 0.5, 0);
+                
+                // 粒子恢复原位逻辑(简化)
+                particles.position.y *= 0.95;
+            }
+            
+            // 更新上一帧状态
+            wasHovering = isHovering;
+
+
+            // 1. 麦克风吹气检测 logic
+            if (meter && !isHovering) { // 悬浮时优先响应悬浮
+                const level = meter.getValue(); 
+                if (level > -15) {
+                    // 吹气时的随机震动，模拟风的湍流
+                    // 为了避免震动过于密集导致麻木，稍微加个概率
+                    if (Math.random() > 0.8) {
+                        triggerHaptic(5); // 极短的震动
+                    }
+
+                    const windStrength = 30;
+                    sphereBody.applyForce(new CANNON.Vec3(
+                        (Math.random() - 0.5) * windStrength,
+                        (Math.random() - 0.5) * windStrength + 10,
+                        (Math.random() - 0.5) * windStrength
+                    ), sphereBody.position);
+
+                    innerCoreMesh.material.color.setHex(0xffffff);
+                    particles.rotation.z += 0.2;
+                } else {
+                     // 恢复紫色 (如果没在悬浮)
+                     if (innerCoreMesh.material.color.getHex() !== 0xff00ff && !isHovering) {
+                         // 简单的颜色平滑过渡模拟
+                         if (Math.random() > 0.9) innerCoreMesh.material.color.setHex(0xff00ff);
+                     }
+                }
+            }
+
+            // 2. 更新物理世界
+            world.step(1 / 60);
+
+            // 手动边界限制
+            const limitX = 3.5;
+            const limitY = 6.0;
+            const vel = sphereBody.velocity;
+            
+            if (sphereBody.position.x > limitX) {
+                sphereBody.position.x = limitX;
+                if(vel.x > 0) { vel.x *= -0.8; triggerBounce(Math.abs(vel.x)); }
+            } else if (sphereBody.position.x < -limitX) {
+                sphereBody.position.x = -limitX;
+                if(vel.x < 0) { vel.x *= -0.8; triggerBounce(Math.abs(vel.x)); }
+            }
+
+            if (sphereBody.position.y > limitY) {
+                sphereBody.position.y = limitY;
+                if(vel.y > 0) { vel.y *= -0.8; triggerBounce(Math.abs(vel.y)); }
+            } else if (sphereBody.position.y < -limitY) {
+                sphereBody.position.y = -limitY;
+                if(vel.y < 0) { vel.y *= -0.8; triggerBounce(Math.abs(vel.y)); }
+            }
+
+            sphereBody.position.z = 0;
+            sphereBody.velocity.z = 0;
+
+            // 3. 同步视觉物体
+            innerCoreMesh.position.copy(sphereBody.position);
+            coreMesh.position.lerp(sphereBody.position, 0.1);
+            
+            coreMesh.rotation.x += 0.02;
+            coreMesh.rotation.y += 0.02;
+            if(!isHovering) particles.rotation.y = deviceGamma * 0.01;
+
+            // 4. Audio 反馈
+            updateAudio();
+
+            // 5. 渲染
+            composer.render();
+            
+            // 调试信息
+            const micLevel = meter ? Math.round(meter.getValue()) : 'N/A';
+            const hoverState = isHovering ? "ON" : "OFF";
+            document.getElementById('debug').innerText = 
+                `G: ${Math.round(deviceGamma)},${Math.round(deviceBeta)} | Mic: ${micLevel} | Hover: ${hoverState}`;
+        }
+
+        function triggerBounce(velocity) {
+            if (velocity > 2) {
+                const note = velocity > 10 ? "C4" : (velocity > 5 ? "G3" : "C3");
+                metalSynth.triggerAttackRelease(note, "8n");
+                
+                // 碰撞触觉反馈
+                // 速度越快，震动时间稍微越长 (但保持短促以获得"敲击"感)
+                // 限制最大震动时长，避免拖泥带水
+                const hapticDuration = Math.min(Math.floor(velocity * 2), 20);
+                triggerHaptic(hapticDuration);
+
+                if ((!meter || meter.getValue() <= -15) && !isHovering) {
+                    innerCoreMesh.material.color.setHex(0xffffff);
+                    setTimeout(() => { if(!isHovering) innerCoreMesh.material.color.setHex(0xff00ff) }, 100);
+                }
+            }
+        }
+
+        function updateAudio() {
+            if (!synth) return;
+            const speed = sphereBody.velocity.length();
+            const modulation = Math.min(Math.max(speed * 2, 5), 50);
+            synth.modulationIndex.rampTo(modulation, 0.1);
+            const detuneVal = sphereBody.position.y * 100;
+            synth.detune.rampTo(detuneVal, 0.1);
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            composer.setSize(window.innerWidth, window.innerHeight);
+        }
+    </script>
+</body>
+</html>
