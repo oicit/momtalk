@@ -1,0 +1,477 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>生育支持系统自查清单</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;700;800;900&family=Noto+Sans+SC:wght@400;700;900&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --duo-green: #58cc02;
+            --duo-blue: #1cb0f6;
+            --duo-orange: #ff9600;
+            --duo-purple: #ce82ff;
+            --duo-red: #ff4b4b;
+            --duo-yellow: #ffc800;
+        }
+        body {
+            font-family: 'Nunito', 'Noto Sans SC', sans-serif;
+            background-color: #f7f7f7;
+            color: #4b4b4b;
+            margin: 0;
+        }
+        .duo-card {
+            background: #fff;
+            border: 2px solid #e5e5e5;
+            border-bottom: 6px solid #e5e5e5;
+            border-radius: 20px;
+        }
+
+        /* 顶部分区标签 */
+        .tab-btn {
+            background-color: #fff; border: 2px solid #e5e5e5; border-bottom: 4px solid #e5e5e5;
+            padding: 6px 12px; border-radius: 14px; font-weight: 800; cursor: pointer;
+            transition: all 0.1s; white-space: nowrap; font-size: 14px;
+            display: flex; align-items: center; gap: 6px;
+        }
+        .tab-btn:active { border-bottom-width: 2px; transform: translateY(2px); }
+        .tab-btn.active { color: #fff; }
+        .tab-badge { font-size: 11px; font-weight: 900; opacity: 0.8; }
+
+        /* 三态选择按钮 */
+        .ans-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 10px; }
+        .ans-btn {
+            border: 2px solid #e5e5e5; border-bottom: 4px solid #e5e5e5; background: #fff;
+            border-radius: 12px; padding: 6px 4px; font-weight: 800; font-size: 13px;
+            cursor: pointer; transition: all 0.1s; color: #afafaf;
+        }
+        .ans-btn:active { border-bottom-width: 2px; transform: translateY(2px); }
+        .ans-btn.sel-yes    { background: #d7ffb8; border-color: #58cc02; color: #46a302; }
+        .ans-btn.sel-unsure { background: #fff4cc; border-color: #ffc800; color: #b88a00; }
+        .ans-btn.sel-no     { background: #ffdfe0; border-color: #ff4b4b; color: #ea2b2b; }
+
+        .item-card { transition: border-color 0.15s; }
+        .item-card.ans-yes    { border-color: #b8f28b; }
+        .item-card.ans-unsure { border-color: #ffe58a; }
+        .item-card.ans-no     { border-color: #ffc1c1; }
+
+        .progress-track { background: #e5e5e5; border-radius: 999px; height: 14px; overflow: hidden; }
+        .progress-fill  { height: 100%; border-radius: 999px; transition: width 0.4s ease; position: relative; }
+        .progress-fill::after {
+            content: ''; position: absolute; left: 8px; right: 8px; top: 3px; height: 3px;
+            background: rgba(255,255,255,0.35); border-radius: 999px;
+        }
+
+        .big-btn {
+            border-radius: 16px; font-weight: 900; padding: 12px 16px; color: #fff;
+            border-bottom: 5px solid rgba(0,0,0,0.2); transition: all 0.1s; cursor: pointer;
+        }
+        .big-btn:active { border-bottom-width: 2px; transform: translateY(3px); }
+        .ghost-btn {
+            border-radius: 16px; font-weight: 900; padding: 12px 16px; background: #fff;
+            border: 2px solid #e5e5e5; border-bottom: 5px solid #e5e5e5; cursor: pointer; transition: all 0.1s;
+        }
+        .ghost-btn:active { border-bottom-width: 2px; transform: translateY(3px); }
+
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { scrollbar-width: none; }
+
+        .toast {
+            position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%) translateY(120px);
+            background: #4b4b4b; color: #fff; padding: 10px 18px; border-radius: 14px; font-weight: 800;
+            transition: transform 0.25s ease; z-index: 50; font-size: 14px;
+        }
+        .toast.show { transform: translateX(-50%) translateY(0); }
+    </style>
+</head>
+<body>
+
+    <!-- 顶部：标题 + 总进度 + 分区标签 -->
+    <header class="sticky top-0 z-20 bg-[#f7f7f7]/95 backdrop-blur border-b-2 border-[#e5e5e5]">
+        <div class="max-w-xl mx-auto px-4 pt-4 pb-3">
+            <div class="flex items-center justify-between gap-3">
+                <div class="min-w-0">
+                    <h1 class="text-xl font-black text-[#1cb0f6] truncate">🍼 生育支持系统自查清单</h1>
+                    <p class="text-xs font-bold text-[#afafaf] mt-0.5">不是考试，是帮你看清：哪些已经谈清楚，哪些只是"觉得应该没问题"</p>
+                </div>
+                <button onclick="resetAll()" class="ghost-btn !py-1.5 !px-3 text-xs shrink-0 text-[#afafaf]">重置</button>
+            </div>
+            <div class="flex items-center gap-3 mt-3">
+                <div class="progress-track flex-1"><div id="overallFill" class="progress-fill" style="width:0;background:var(--duo-green)"></div></div>
+                <span id="overallText" class="text-sm font-black text-[#58cc02] w-14 text-right">0/0</span>
+            </div>
+            <nav id="tabs" class="flex gap-2 overflow-x-auto no-scrollbar mt-3 pb-1"></nav>
+        </div>
+    </header>
+
+    <main class="max-w-xl mx-auto px-4 py-5 pb-24">
+        <div id="view"></div>
+    </main>
+
+    <div id="toast" class="toast"></div>
+
+    <script>
+        // ===== 清单内容 =====
+        const SECTIONS = [
+            {
+                id: 'people', icon: '👥', title: '人力支持系统', color: '#1cb0f6',
+                groups: [
+                    { title: '伴侣是否真的能成为第一责任人', items: [
+                        '愿意承担家务，而不是"帮忙一下"',
+                        '会做基础饭菜，至少能独立解决一日三餐',
+                        '怀孕后能主动分担更多家务',
+                        '产后愿意参与夜间照顾宝宝',
+                        '承担换尿布、洗澡、哄睡等基础育儿任务',
+                        '不会因为父母来了，就退回"被照顾的儿子"角色',
+                        '当我和长辈意见不一致时，能主动沟通协调',
+                        '我情绪崩溃、身体虚弱时，他能顶上'
+                    ]},
+                    { title: '父母 / 公婆是否能提供支持', items: [
+                        '至少有一方老人愿意来帮忙',
+                        '身体状况允许照顾孕妇或宝宝',
+                        '有时间，不受工作束缚',
+                        '能明确来多久、什么时候来',
+                        '擅长做饭 / 家务 / 照顾孩子中的至少一项',
+                        '来帮忙时，不会过度控制小家庭生活',
+                        '愿意"帮忙"，而不是"接管"'
+                    ]},
+                    { title: '备用外援是否存在', items: [
+                        '如果老人来不了，有备用方案',
+                        '能接受请月嫂 / 保姆 / 钟点工',
+                        '能接受托育或其他社会化支持',
+                        '有朋友 / 亲戚可在紧急情况下搭把手'
+                    ]}
+                ]
+            },
+            {
+                id: 'money', icon: '💰', title: '经济支持系统', color: '#ff9600',
+                groups: [
+                    { title: '生孩子的钱，是否真的算过', items: [
+                        '目前家庭收入相对稳定',
+                        '即使一方短期收入下降，家庭也能正常运转',
+                        '有一笔应急储蓄',
+                        '能承担孕前检查和孕期产检支出',
+                        '能承担分娩相关费用',
+                        '能承担月嫂 / 陪护 / 产后恢复费用',
+                        '能承担宝宝前期用品开销',
+                        '对奶粉、尿布、医疗、托育等长期支出有基本概念',
+                        '未来 1–3 年的养育成本大致算过',
+                        '即使出现突发医疗支出，也不至于立刻崩盘'
+                    ]},
+                    { title: '最坏情况是否想过', items: [
+                        '如果孕期状态差，需要减少工作 / 学习，家庭能承受',
+                        '如果产后我恢复慢，家庭能承受',
+                        '如果孩子出生后需要更多照顾，家庭有缓冲',
+                        '如果未来换工作 / 搬家 / 收入波动，有基本预案'
+                    ]}
+                ]
+            },
+            {
+                id: 'time', icon: '⏰', title: '时间支持系统', color: '#ce82ff',
+                groups: [
+                    { title: '谁来真正付出时间', items: [
+                        '怀孕后有人能陪我产检',
+                        '身体不舒服时，有人能及时照顾我',
+                        '产后前 3 个月主要照顾者是谁，已有设想',
+                        '白天谁带娃，晚上谁值班，有基本方案',
+                        '做饭、家务、照顾产妇分别由谁承担，有初步分工',
+                        '老人离开后，谁来接手，想过',
+                        '双方都忙的时候，孩子由谁照顾，想过',
+                        '孩子生病时，谁请假、谁处理，想过',
+                        '如果伴侣出差 / 加班 / 不在身边，有替代方案',
+                        '我自己还能保留最基本的睡眠和休息时间'
+                    ]}
+                ]
+            },
+            {
+                id: 'home', icon: '🏠', title: '生活与居住支持系统', color: '#58cc02',
+                groups: [
+                    { title: '房子和生活方式，能不能接住孩子', items: [
+                        '现有住房能基本满足孕期和育儿需求',
+                        '如果老人来帮忙，有地方住',
+                        '长期同住是否现实，认真想过',
+                        '房间数量和空间基本够用',
+                        '卫生间、厨房等日常使用不会过度拥挤',
+                        '家里通风、采光、收纳条件尚可',
+                        '周边买菜、买日用品比较方便',
+                        '去医院 / 诊所交通方便',
+                        '如果有婴儿车，出行不会特别困难',
+                        '住处的楼层、电梯、周边环境适合带娃'
+                    ]},
+                    { title: '同住边界是否能提前约定', items: [
+                        '作息差异可以接受',
+                        '饮食习惯差异可以接受',
+                        '卫生习惯差异可以接受',
+                        '谁做饭、谁采购、谁负责家务可以说清楚',
+                        '长辈能接受不过度干预',
+                        '养育方式不同的时候，知道谁来拍板',
+                        '能接受"帮忙的人也有自己的生活习惯"',
+                        '也能保护好自己和小家庭的边界'
+                    ]}
+                ]
+            },
+            {
+                id: 'key', icon: '🔑', title: '最后 5 个关键自测题', color: '#ff4b4b',
+                groups: [
+                    { title: '诚实回答，比答"是"更重要', items: [
+                        '如果没有老人长期帮忙，我们还能把孩子养下去',
+                        '如果伴侣只能做到现在这个水平，我能接受',
+                        '如果生育成本比预想高很多，家庭还能撑住',
+                        '如果主要帮手临时退出，我有 Plan B',
+                        '我现在的支持系统，是"已经谈清楚了"，而不是"我觉得应该没问题"'
+                    ]}
+                ]
+            }
+        ];
+
+        const ANSWERS = {
+            yes:    { label: '✅ 已谈清楚', score: 1 },
+            unsure: { label: '🤔 不确定',   score: 0.5 },
+            no:     { label: '❌ 还没有',   score: 0 }
+        };
+
+        // ===== 状态与持久化 =====
+        const STORAGE_KEY = 'momtalk_fertility_checklist_v1';
+        let answers = {};
+        try { answers = JSON.parse(localStorage.getItem(STORAGE_KEY)) || {}; } catch (e) { answers = {}; }
+        let currentTab = SECTIONS[0].id;
+
+        function persist() {
+            try { localStorage.setItem(STORAGE_KEY, JSON.stringify(answers)); } catch (e) {}
+        }
+
+        function itemKey(sIdx, gIdx, iIdx) { return `${SECTIONS[sIdx].id}-${gIdx}-${iIdx}`; }
+
+        function sectionItems(sIdx) {
+            const list = [];
+            SECTIONS[sIdx].groups.forEach((g, gIdx) => g.items.forEach((text, iIdx) => {
+                list.push({ key: itemKey(sIdx, gIdx, iIdx), text, group: g.title });
+            }));
+            return list;
+        }
+
+        function sectionStats(sIdx) {
+            const items = sectionItems(sIdx);
+            let answered = 0, score = 0;
+            items.forEach(it => {
+                const a = answers[it.key];
+                if (a) { answered++; score += ANSWERS[a].score; }
+            });
+            return { total: items.length, answered, pct: items.length ? Math.round(score / items.length * 100) : 0 };
+        }
+
+        function vibrate(ms) {
+            try { if (navigator.vibrate) navigator.vibrate(ms); } catch (e) {}
+        }
+
+        function showToast(msg) {
+            const t = document.getElementById('toast');
+            t.textContent = msg;
+            t.classList.add('show');
+            clearTimeout(showToast._timer);
+            showToast._timer = setTimeout(() => t.classList.remove('show'), 1800);
+        }
+
+        // ===== 渲染 =====
+        function renderHeader() {
+            let total = 0, answered = 0;
+            SECTIONS.forEach((_, i) => { const s = sectionStats(i); total += s.total; answered += s.answered; });
+            document.getElementById('overallFill').style.width = (total ? answered / total * 100 : 0) + '%';
+            document.getElementById('overallText').textContent = `${answered}/${total}`;
+
+            const tabs = SECTIONS.map((s, i) => {
+                const st = sectionStats(i);
+                const active = currentTab === s.id;
+                const style = active ? `background:${s.color};border-color:${s.color};border-bottom-color:rgba(0,0,0,0.2)` : '';
+                return `<button class="tab-btn ${active ? 'active' : ''}" style="${style}" onclick="switchTab('${s.id}')">
+                    <span>${s.icon}</span><span>${s.title.replace('支持系统', '').replace('最后 5 个关键自测题', '关键5问')}</span>
+                    <span class="tab-badge">${st.answered}/${st.total}</span>
+                </button>`;
+            }).join('');
+            const resActive = currentTab === 'result';
+            const resStyle = resActive ? 'background:#4b4b4b;border-color:#4b4b4b;border-bottom-color:#000' : '';
+            document.getElementById('tabs').innerHTML = tabs +
+                `<button class="tab-btn ${resActive ? 'active' : ''}" style="${resStyle}" onclick="switchTab('result')"><span>📊</span><span>结果</span></button>`;
+        }
+
+        function renderSection(sIdx) {
+            const s = SECTIONS[sIdx];
+            const st = sectionStats(sIdx);
+            let html = `
+                <div class="flex items-center gap-3 mb-4">
+                    <div class="w-12 h-12 rounded-2xl flex items-center justify-center text-2xl" style="background:${s.color}22">${s.icon}</div>
+                    <div class="flex-1">
+                        <div class="text-xs font-black text-[#afafaf]">第 ${sIdx + 1} 部分</div>
+                        <h2 class="text-xl font-black" style="color:${s.color}">${s.title}</h2>
+                    </div>
+                    <div class="text-right">
+                        <div class="text-2xl font-black" style="color:${s.color}">${st.pct}%</div>
+                        <div class="text-[11px] font-bold text-[#afafaf]">准备度</div>
+                    </div>
+                </div>`;
+
+            s.groups.forEach((g, gIdx) => {
+                html += `<h3 class="text-sm font-black text-[#afafaf] mt-6 mb-3 pb-1 border-b-2 border-[#f0f0f0]">${g.title}</h3>`;
+                g.items.forEach((text, iIdx) => {
+                    const key = itemKey(sIdx, gIdx, iIdx);
+                    const a = answers[key];
+                    html += `
+                        <div class="duo-card item-card ${a ? 'ans-' + a : ''} p-4 mb-3">
+                            <div class="font-bold text-[15px] leading-snug">${text}</div>
+                            <div class="ans-row">
+                                ${Object.keys(ANSWERS).map(k => `
+                                    <button class="ans-btn ${a === k ? 'sel-' + k : ''}" onclick="setAnswer('${key}','${k}')">${ANSWERS[k].label}</button>
+                                `).join('')}
+                            </div>
+                        </div>`;
+                });
+            });
+
+            const next = SECTIONS[sIdx + 1];
+            html += `
+                <button class="big-btn w-full mt-6" style="background:${next ? next.color : '#4b4b4b'}" onclick="switchTab('${next ? next.id : 'result'}')">
+                    ${next ? `下一部分：${next.icon} ${next.title}` : '📊 查看我的结果'}
+                </button>`;
+            return html;
+        }
+
+        function verdict(pct) {
+            if (pct >= 80) return { emoji: '🌳', title: '支持系统比较扎实', text: '大部分关键问题已经谈清楚了。把剩下的"不确定"补上，就是一个很稳的起点。', color: '#58cc02' };
+            if (pct >= 60) return { emoji: '🌱', title: '框架已有，还需补洞', text: '你们已经想过很多事，但还有一些环节是"应该没问题"。挑最薄弱的部分，找个时间认真聊一次。', color: '#1cb0f6' };
+            if (pct >= 40) return { emoji: '🧭', title: '值得坐下来好好谈谈', text: '不少关键环节还没有落地。这不是坏事——现在发现，比孩子出生后再发现要轻松得多。', color: '#ff9600' };
+            return { emoji: '🫶', title: '先把地基打一打', text: '目前的支持系统还比较薄。可以先从"待谈清单"里挑 3 件最重要的事开始，一步一步来。', color: '#ff4b4b' };
+        }
+
+        function renderResult() {
+            let total = 0, answered = 0, weighted = 0;
+            const rows = SECTIONS.map((s, i) => {
+                const st = sectionStats(i);
+                total += st.total; answered += st.answered; weighted += st.pct * st.total;
+                return { s, st };
+            });
+            const pct = total ? Math.round(weighted / total) : 0;
+            const v = verdict(pct);
+
+            if (answered === 0) {
+                return `
+                    <div class="duo-card p-8 text-center">
+                        <div class="text-5xl mb-3">📝</div>
+                        <div class="text-lg font-black">还没有开始作答</div>
+                        <p class="text-sm font-bold text-[#afafaf] mt-2">先从第一部分开始，每题选"已谈清楚 / 不确定 / 还没有"。</p>
+                        <button class="big-btn mt-5 w-full" style="background:var(--duo-blue)" onclick="switchTab('${SECTIONS[0].id}')">开始自查</button>
+                    </div>`;
+            }
+
+            let html = `
+                <div class="duo-card p-6 text-center" style="border-color:${v.color}55">
+                    <div class="text-5xl">${v.emoji}</div>
+                    <div class="text-4xl font-black mt-2" style="color:${v.color}">${pct}%</div>
+                    <div class="text-lg font-black mt-1">${v.title}</div>
+                    <p class="text-sm font-bold text-[#777] mt-2 leading-relaxed">${v.text}</p>
+                    ${answered < total ? `<p class="text-xs font-black text-[#ff9600] mt-3">还有 ${total - answered} 题未作答，结果仅供参考</p>` : ''}
+                </div>
+
+                <h3 class="text-sm font-black text-[#afafaf] mt-7 mb-3 pb-1 border-b-2 border-[#f0f0f0]">各系统准备度</h3>
+                <div class="duo-card p-5 space-y-4">
+                    ${rows.map(({ s, st }) => `
+                        <button class="w-full text-left" onclick="switchTab('${s.id}')">
+                            <div class="flex justify-between text-sm font-black mb-1.5">
+                                <span>${s.icon} ${s.title}</span><span style="color:${s.color}">${st.pct}%</span>
+                            </div>
+                            <div class="progress-track"><div class="progress-fill" style="width:${st.pct}%;background:${s.color}"></div></div>
+                        </button>
+                    `).join('')}
+                </div>`;
+
+            // 待谈清单：不确定 + 还没有
+            const todo = [];
+            SECTIONS.forEach((s, i) => {
+                const items = sectionItems(i).filter(it => answers[it.key] === 'no' || answers[it.key] === 'unsure');
+                if (items.length) todo.push({ s, items });
+            });
+
+            html += `<h3 class="text-sm font-black text-[#afafaf] mt-7 mb-3 pb-1 border-b-2 border-[#f0f0f0]">💬 待谈清单（${todo.reduce((n, t) => n + t.items.length, 0)}）</h3>`;
+            if (!todo.length) {
+                html += `<div class="duo-card p-5 text-sm font-bold text-[#777]">已作答的题目都已经谈清楚了，太棒了！</div>`;
+            } else {
+                html += `<p class="text-xs font-bold text-[#afafaf] mb-3">把这些带去和伴侣、家人聊一聊。❌ 优先，🤔 其次。</p>`;
+                todo.forEach(({ s, items }) => {
+                    const sorted = items.slice().sort((a, b) => (answers[a.key] === 'no' ? 0 : 1) - (answers[b.key] === 'no' ? 0 : 1));
+                    html += `
+                        <div class="duo-card p-4 mb-3">
+                            <div class="font-black text-sm mb-2" style="color:${s.color}">${s.icon} ${s.title}</div>
+                            <ul class="space-y-2">
+                                ${sorted.map(it => `<li class="flex gap-2 text-sm font-bold leading-snug"><span>${answers[it.key] === 'no' ? '❌' : '🤔'}</span><span>${it.text}</span></li>`).join('')}
+                            </ul>
+                        </div>`;
+                });
+                html += `<button class="big-btn w-full mt-3" style="background:var(--duo-blue)" onclick="copyTodo()">📋 复制待谈清单，发给伴侣</button>`;
+            }
+            return html;
+        }
+
+        function render() {
+            renderHeader();
+            const sIdx = SECTIONS.findIndex(s => s.id === currentTab);
+            document.getElementById('view').innerHTML = sIdx >= 0 ? renderSection(sIdx) : renderResult();
+        }
+
+        // ===== 交互 =====
+        function setAnswer(key, value) {
+            if (answers[key] === value) delete answers[key];
+            else answers[key] = value;
+            vibrate(value === 'yes' ? 15 : 30);
+            persist();
+            const y = window.scrollY;
+            render();
+            window.scrollTo(0, y);
+        }
+
+        function switchTab(id) {
+            currentTab = id;
+            render();
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+
+        function resetAll() {
+            if (!confirm('确定要清空所有作答吗？')) return;
+            answers = {};
+            persist();
+            currentTab = SECTIONS[0].id;
+            render();
+            showToast('已清空');
+        }
+
+        function copyTodo() {
+            const lines = ['【生育支持系统 · 我们还需要谈谈的事】', ''];
+            SECTIONS.forEach((s, i) => {
+                const items = sectionItems(i).filter(it => answers[it.key] === 'no' || answers[it.key] === 'unsure');
+                if (!items.length) return;
+                lines.push(`${s.icon} ${s.title}`);
+                items.forEach(it => lines.push(`  ${answers[it.key] === 'no' ? '❌' : '🤔'} ${it.text}`));
+                lines.push('');
+            });
+            const text = lines.join('\n');
+            const done = () => { vibrate(20); showToast('已复制，去粘贴给 TA 吧'); };
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(text).then(done).catch(() => fallbackCopy(text, done));
+            } else {
+                fallbackCopy(text, done);
+            }
+        }
+
+        function fallbackCopy(text, done) {
+            const ta = document.createElement('textarea');
+            ta.value = text;
+            ta.style.position = 'fixed'; ta.style.opacity = '0';
+            document.body.appendChild(ta);
+            ta.select();
+            try { document.execCommand('copy'); done(); } catch (e) { showToast('复制失败，请手动截图'); }
+            document.body.removeChild(ta);
+        }
+
+        render();
+    </script>
+</body>
+</html>
